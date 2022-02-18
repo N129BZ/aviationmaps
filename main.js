@@ -16,7 +16,7 @@ const createWindow = () => {
             enableRemoteModule: true,
             sandbox: true,
         },
-        title: "Brian's Marvelous Maps",
+        title: "Aviation and Weather Maps",
         icon: `${__dirname}/images/favicon.ico`,
         frame: true
     });
