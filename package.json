@@ -1,7 +1,7 @@
 {
-  "name": "charts",
+  "name": "aviationmaps",
   "version": "1.0.0",
-  "description": "Brian's map app",
+  "description": "Aviation and Weather Maps",
   "main": "main.js",
   "author": "Brian A. Manlove",
   "license": "BSD 3-Clause",
@@ -39,7 +39,7 @@
         {
           "name": "@electron-forge/maker-squirrel",
           "config": {
-            "name": "charts"
+            "name": "aviationmaps"
           }
         },
         {
