@@ -130,22 +130,30 @@ const histdb = new sqlite3.Database(DB_HISTORY, sqlite3.OPEN_READWRITE, (err) =>
     }
 });
 
-function loadAirportsJson() {
-    let sql = `SELECT ident, type, name, elevation_ft, longitude_deg, latitude_deg ` + 
+function loadAirportsJson(useAllAirports = false) {
+    let msgtype = "";
+    if (useAllAirports) {
+        msgtype = "ALLAIRPORTS";
+        sql = `SELECT ident, type, name, elevation_ft, longitude_deg, latitude_deg ` + 
+              `FROM airports WHERE iso_country = 'US'`;
+    }
+    else {
+        msgtype = "AIRPORTS";
+        sql = `SELECT ident, type, name, elevation_ft, longitude_deg, latitude_deg ` + 
               `FROM airports ` +
               `WHERE (type = 'large_airport' OR type = 'medium_airport') ` + 
-              `AND ident LIKE 'K%' ` +
+              //`AND ident LIKE 'K%' ` +
               `AND iso_country = 'US'`;
-
+    }
+    
     let jsonout = {
         "airports": []
     };
-    let outstring = "";
     
     airpdb.all(sql, (err, rows) => {
         if (err == null) {
             rows.forEach(row => {
-                let testrec = {
+                let thisrecord = {
                     "ident": row.ident,
                     "type": row.type,
                     "name": row.name,
@@ -153,7 +161,7 @@ function loadAirportsJson() {
                     "lon": row.longitude_deg,
                     "lat": row.latitude_deg
                 }
-                jsonout.airports.push(testrec);
+                jsonout.airports.push(thisrecord);
             });
         }
         else {
@@ -161,7 +169,7 @@ function loadAirportsJson() {
         }
         let payload = JSON.stringify(jsonout);
         let message = {
-            type: "AIRPORTS",
+            type: msgtype,
             payload: payload
         };
         let outstr = JSON.stringify(message);
@@ -248,7 +256,15 @@ try {
 
     app.get("/getairports", (req, res) => {
         setTimeout(() => {
-            loadAirportsJson()
+            loadAirportsJson(false)
+        }, 200);
+        res.writeHead(200);
+        res.end();
+    });
+    
+    app.get("/getallairports", (req, res) => {
+        setTimeout(() => {
+            loadAirportsJson(true)
         }, 200);
         res.writeHead(200);
         res.end();

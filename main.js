@@ -14,7 +14,7 @@ const createWindow = () => {
             nodeIntegration: true,
             contextIsolation: false,
             enableRemoteModule: true,
-            sandbox: true,
+            sandbox: true
         },
         title: "Aviation and Weather Maps",
         icon: `${__dirname}/images/favicon.ico`,

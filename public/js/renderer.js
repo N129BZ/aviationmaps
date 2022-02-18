@@ -14,6 +14,7 @@ let URL_GET_HISTORY         = `${URL_SERVER}/gethistory`;
 let URL_GET_SETTINGS        = `${URL_SERVER}/getsettings`;
 let URL_PUT_HISTORY         = `${URL_SERVER}/puthistory`;
 let URL_GET_AIRPORTS        = `${URL_SERVER}/getairports`;
+let URL_GET_ALL_AIRPORTS    = `${URL_SERVER}/getallairports`;
 let URL_GET_METARS          = `${URL_SERVER}/getmetars`;
 let URL_GET_TAF             = `${URL_SERVER}/gettaf`;
 let URL_GET_PIREPS          = `${URL_SERVER}/getpireps`
@@ -27,9 +28,16 @@ let airportJson = {};
 let last_longitude = 0;
 let last_latitude = 0;
 let last_heading = 0;
+
 let apfeatures = new ol.Collection();
+let allapfeatures = new ol.Collection();
+
 let airportLayer;
 let airportVectorSource;
+
+let allAirportsLayer;
+let allAirportsVectorSource;
+
 let vfrsecLayer;
 let termLayer;
 let heliLayer;
@@ -101,7 +109,7 @@ let lifrMarker = new ol.style.Icon({
 
 let circleMarker = new ol.style.Icon({
     crossOrigin: 'anonymous',
-    src: `${URL_SERVER}/img/clear.png`,
+    src: `${URL_SERVER}/img/dot.png`,
     size: [45, 45],
     offset: [0, 0],
     opacity: 1,
@@ -157,6 +165,15 @@ $.get({
     }
 });
 
+$.get({
+    async: true,
+    type: "GET",
+    url: URL_GET_ALL_AIRPORTS,
+    error: function (request, status, err) {
+        console.error(`ERROR GETTING ALL AIRPORTS: ${err}`);
+    }
+});
+
 function loadAirportsArray(jsonobj) {
     try {
         for (let i=0; i< jsonobj.airports.length; i++) {
@@ -174,6 +191,28 @@ function loadAirportsArray(jsonobj) {
             marker.setStyle(vfrStyle);
             apfeatures.push(marker);
         };
+    }
+    catch(err){
+        console.error(err);
+    }
+}
+
+function loadAllAirportsArray(jsonobj) {
+    try {
+        for (let i=0; i< jsonobj.airports.length; i++) {
+            let airport = jsonobj.airports[i];
+            let lon = airport.lon;
+            let lat = airport.lat;
+            let marker = new ol.Feature({
+                ident: airport.ident,
+                type: airport.type,
+                name: airport.name,
+                geometry: new ol.geom.Point(ol.proj.fromLonLat([lon, lat])),
+            });
+            marker.setId(airport.ident);
+            marker.setStyle(circleStyle);
+            allapfeatures.push(marker);
+        }
     }
     catch(err){
         console.error(err);
@@ -200,6 +239,9 @@ $(() => {
             }
             else if (message.type === "METARS") {
                 processMetars(payload);
+            }
+            else if (message.type === "ALLAIRPORTS") {
+                loadAllAirportsArray(payload);
             }
         }
 
@@ -452,7 +494,6 @@ function getMetarsForCurrentView() {
     }
 }
 
-
 function processMetars(metars) {
     if (processingmetars) {
         return;
@@ -460,66 +501,91 @@ function processMetars(metars) {
     processingmetars = true;
     
     let newmetars = metars.response.data;
+    
+    if (newmetars === undefined) {
+        processingmetars = false;
+        return;
+    }
+
     try {
-        newmetars.METAR.forEach((metar) => {    
-            let newmetar = new Metar();
-            newmetar.id = metar.station_id;
-            newmetar.cat = metar.flight_category;
-            newmetar.time = metar.observation_time;
-            
-            let tF = convertCtoF(metar.temp_c);
-            newmetar.temp = `${metar.temp_c}°C  (${tF}°F)`;
-            
-            let dF = convertCtoF(metar.dewpoint_c)
-            newmetar.dewp = `${metar.dewpoint_c}°C  (${dF}°F)`;
+        let count = parseInt(newmetars.num_results);
+        if (count === 1) {
+            processMetar(newmetars.METAR);
+        }
+        else {
+            newmetars.METAR.forEach((metar) => {    
+                processMetar(metar);
+            });
+        }
+    }
+    catch(err) {
+        console.error(err);
+    }
+    finally {
+        processingmetars = false;
+    }
+}
 
-            newmetar.windir = metar.wind_dir_degrees;
-            newmetar.winspd = metar.wind_speed_kt + "";
-            newmetar.wingst = metar.wind_gust_kt + "";
-            newmetar.altim = metar.altim_in_hg;
-            newmetar.vis = metar.visibility_statute_mi;
-            try {
-                if (metar.sky_condition != undefined) {    
-                    metar.sky_condition.forEach((condition) => {
-                        let map = Object.entries(condition);
-                        map.forEach((item) => {
-                            newmetar.sky.push(item);  
-                        });
-                    });
-                }
-            }
-            catch{}
+function processMetar(metar) {
+    let newmetar = new Metar();
+    newmetar.id = metar.station_id;
+    newmetar.cat = metar.flight_category;
+    newmetar.time = metar.observation_time;
+    
+    let tF = convertCtoF(metar.temp_c);
+    newmetar.temp = `${metar.temp_c}°C  (${tF}°F)`;
+    
+    let dF = convertCtoF(metar.dewpoint_c)
+    newmetar.dewp = `${metar.dewpoint_c}°C  (${dF}°F)`;
 
-            let feature = airportVectorSource.getFeatureById(newmetar.id);
-            if (feature !== null) {
-                feature.set('hasmetar', true);
-                feature.set('metar', newmetar);
-                try {
-                    switch (newmetar.cat) {
-                        case 'MVFR':
-                            feature.setStyle(mvfrStyle);
-                            break;
-                        case 'LIFR':
-                            feature.setStyle(lifrStyle);
-                            break;
-                        case 'IFR':
-                            feature.setStyle(ifrStyle)
-                            break;
-                        case 'VFR':
-                        default:
-                            feature.setStyle(vfrStyle);
-                            break;
-                    }
-                    feature.changed();
-                }
-                finally{ }
-            }
-        });
+    newmetar.windir = metar.wind_dir_degrees;
+    newmetar.winspd = metar.wind_speed_kt + "";
+    newmetar.wingst = metar.wind_gust_kt + "";
+    newmetar.altim = metar.altim_in_hg;
+    newmetar.vis = metar.visibility_statute_mi;
+    try {
+        if (metar.sky_condition !== undefined) {    
+            metar.sky_condition.forEach((condition) => {
+                let map = Object.entries(condition);
+                map.forEach((item) => {
+                    newmetar.sky.push(item);  
+                });
+            });
+        }
     }
     catch(err){
         console.error(err);
     }
-    processingmetars = false;
+
+    let feature = airportVectorSource.getFeatureById(newmetar.id);
+    if (feature !== null) {
+        feature.set('hasmetar', true);
+        feature.set('metar', newmetar);
+        try {
+            switch (newmetar.cat) {
+                case 'MVFR':
+                    feature.setStyle(mvfrStyle);
+                    break;
+                case 'LIFR':
+                    feature.setStyle(lifrStyle);
+                    break;
+                case 'IFR':
+                    feature.setStyle(ifrStyle)
+                    break;
+                case 'VFR':
+                default:
+                    feature.setStyle(vfrStyle);
+                    break;
+            }
+            feature.changed();
+        }
+        catch(err){
+            console.error(err);
+        }
+        finally{
+            
+        }
+    }
 }
 
 function resizeDots(zoom) {
@@ -529,6 +595,7 @@ function resizeDots(zoom) {
     mvfrMarker.setScale(newscale);
     lifrMarker.setScale(newscale);
     ifrMarker.setScale(newscale);
+    circleMarker.setScale(newscale);
 }
 
 wxSource = new ol.source.TileWMS({
@@ -641,15 +708,25 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
     airportVectorSource = new ol.source.Vector({
         features: apfeatures
     });
-
     airportLayer = new ol.layer.Vector({
-        title: "Get Airport Metars",
+        title: "Get Metars",
         source: airportVectorSource,
         visible: false,
         extent: extent,
         zIndex: 11
     }); 
 
+    allAirportsVectorSource = new ol.source.Vector({
+        features: allapfeatures
+    });
+    allAirportsLayer = new ol.layer.Vector({
+        title: "All US Airports",
+        source: allAirportsVectorSource,
+        visible: false,
+        extent: extent,
+        zIndex: 11
+    }); 
+    
     wxLayer = new ol.layer.Tile({
         title: "Animated Weather",
         extent: extent,
@@ -659,6 +736,7 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
     });
 
     map.addLayer(tiledebug);
+    map.addLayer(allAirportsLayer);
     map.addLayer(airportLayer); 
     map.addLayer(wxLayer);
     map.addLayer(caribLayer);
@@ -684,6 +762,11 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
             firstmetarload = true;
             getMetarsForCurrentView();
         }
+    });
+
+    allAirportsLayer.on('change:visible', () => {
+        let visible = allAirportsLayer.get('visible');
+        console.log("ALL AIRPORTS ARE " + visible);
     });
 
     wxLayer.on('change:visible', () => {
