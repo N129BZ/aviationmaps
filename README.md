@@ -1,4 +1,4 @@
-## This web-based application displays FAA charts, OpenStreetMaps, animated weather, and much more, using electron/node/express and the OpenLayers map API.        
+## This web-based application displays FAA charts, OpenStreetMaps, animated weather, and much more, using node.js express and the OpenLayers map API.        
 ### Offline FAA charts include Sectional, Terminal, Helicopter, Caribbean,and both versions of Grand Canyon charts served from mbtiles databases. It can also poll Stratux GPS/AHRS data to plot ownship position and heading over the map, giving basic "moving map" functionality. It can also save position data in a separate history database at user-defined intervals.   
 
 **See https://github.com/N129BZ/ChartMaker for an automated FAA chart mbtiles processor**

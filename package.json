@@ -1,0 +1,62 @@
+{
+  "name": "charts",
+  "version": "1.0.0",
+  "description": "Brian's map app",
+  "main": "main.js",
+  "author": "Brian A. Manlove",
+  "license": "BSD 3-Clause",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "electron-squirrel-startup": "^1.0.0",
+    "express": "^4.17.2",
+    "fast-xml-parser": "^4.0.3",
+    "fs": "^0.0.1-security",
+    "math": "0.0.3",
+    "rpmbuild": "^0.0.23",
+    "serve-favicon": "^2.5.0",
+    "sqlite3": "^5.0.2",
+    "url": "^0.11.0",
+    "websocket": "^1.0.34",
+    "xmlhttprequest": "^1.8.0"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "^6.0.0-beta.63",
+    "@electron-forge/maker-deb": "^6.0.0-beta.63",
+    "@electron-forge/maker-rpm": "^6.0.0-beta.63",
+    "@electron-forge/maker-squirrel": "^6.0.0-beta.63",
+    "@electron-forge/maker-zip": "^6.0.0-beta.63",
+    "electron": "17.0.1"
+  },
+  "scripts": {
+    "start": "electron-forge start",
+    "package": "electron-forge package",
+    "make": "electron-forge make"
+  },
+  "config": {
+    "forge": {
+      "packagerConfig": {},
+      "makers": [
+        {
+          "name": "@electron-forge/maker-squirrel",
+          "config": {
+            "name": "charts"
+          }
+        },
+        {
+          "name": "@electron-forge/maker-zip",
+          "platforms": [
+            "darwin"
+          ]
+        },
+        {
+          "name": "@electron-forge/maker-deb",
+          "config": {}
+        },
+        {
+          "name": "@electron-forge/maker-rpm",
+          "config": {}
+        }
+      ]
+    }
+  }
+}
