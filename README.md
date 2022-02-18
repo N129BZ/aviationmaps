@@ -13,7 +13,7 @@
     "histintervalmsec": 15000,
     "getgpsfromstratux": false,
     "gpsintervalmsec": 1000,
-    "getmetars": false,
+    "gettimedmetars": false,
     "metarintervalmsec": 300000,
     "httpport": 8080,
     "startupzoom": 10,
