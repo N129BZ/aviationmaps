@@ -20,7 +20,7 @@ const createWindow = () => {
         icon: `${__dirname}/images/favicon.ico`,
         frame: true
     });
-    appWindow.loadURL('http://localhost:5000/');
+    appWindow.loadURL(`http://localhost:${settings.httpport}/`);
     appWindow.focus();
     const mainMenu = Menu.buildFromTemplate(mainMenuTemplate);
     Menu.setApplicationMenu(mainMenu);
