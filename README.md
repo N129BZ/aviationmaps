@@ -4,7 +4,7 @@
 
 **See https://github.com/N129BZ/ChartMaker for an automated FAA chart mbtiles processor**
 
-**Instructions:** Obviously since this is a node app, you will need node.js installed. Clone this project, open a terminal in the folder you cloned it to, and enter "npm install". You can then either run the application directly from Visual Studio Code, or enter "node index.js" in the terminal. 
+**Instructions:** Requires node.js. Clone this project, open a terminal in the folder you cloned it to, and enter "npm install". You can then either run the application directly from Visual Studio Code, or enter "npm start" in the terminal. 
 
 ###
 **User-editable values in settings.json:**
