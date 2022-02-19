@@ -73,7 +73,7 @@ https://github.com/cyoung/stratux/
 https://openlayers.org/     
 
 ###
-**Animated weather radar layer over the Sectional chart**
+**Animated weather radar layer over the Sectional chart, ownship image displayed via Stratux integration**
 ![ANIMWX](./images/SectWithWx.png)
 **OpenStreetMap with airport status colored markers and METAR popup**
 ![OSMWMETAR](./images/OsmWithMetars.png)
