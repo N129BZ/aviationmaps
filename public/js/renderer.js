@@ -433,13 +433,21 @@ map.on('moveend', function(e) {
     }
 });
 
+// map.on('click', (evt) => {
+//     map.forEachFeatureAtPixel(evt.pixel, (feature) => {
+//         if (!feature) {
+//             metarcloser.onclick();
+//             showingmetar = false;
+//         }
+//     });
+// });
+
 map.on('pointermove', (evt) => {
     if (getmetars) {
         let hasfeature = false;
-        map.forEachFeatureAtPixel(evt.pixel, function (feature) {
+        map.forEachFeatureAtPixel(evt.pixel, (feature) => {
             if (feature) {
                 hasfeature = true;
-                let name = feature.get("name");
                 if (feature.get("hasmetar")) {
                     let thismetar = feature.get("metar");
                     let ident = thismetar.id;
@@ -478,6 +486,7 @@ map.on('pointermove', (evt) => {
                             break;
                     }
                     if (ident != "undefined") {
+                        let name = feature.get("name");
                         let coordinate = evt.coordinate;
                         let html = `<div id="#mymetar"><pre><code><p>`
                         html +=   (name != "" && name != "undefined") ? `${css}&nbsp&nbsp${name} - ${cat}&nbsp&nbsp</label><p></p>` : ""
@@ -495,8 +504,10 @@ map.on('pointermove', (evt) => {
                         metarcontent.innerHTML = html; 
                         showingmetar = true;
                         metaroverlay.setPosition(coordinate);
-
-                        getTaf(ident);
+                        
+                        if (settings.gettafwithmetar) {
+                            getTaf(ident);
+                        }
                     }
                     thismetar = null;
                 }
@@ -547,13 +558,15 @@ function processMetars(metars) {
 
     try {
         let count = parseInt(newmetars.num_results);
-        if (count === 1) {
-            processMetar(newmetars.METAR);
-        }
-        else {
-            newmetars.METAR.forEach((metar) => {    
-                processMetar(metar);
-            });
+        if (count > 0) {
+            if (count === 1) {
+                processMetar(newmetars.METAR);
+            }
+            else {
+                newmetars.METAR.forEach((metar) => {    
+                    processMetar(metar);
+                });
+            }
         }
     }
     catch(err) {
@@ -801,7 +814,7 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
             getMetarsForCurrentView();
         }
     });
-
+    
     allAirportsLayer.on('change:visible', () => {
         let visible = allAirportsLayer.get('visible');
         regioncontrol.style.visibility = visible ? 'visible' : 'hidden';
@@ -818,6 +831,13 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
         visible ? playWeatherRadar() : stopWeatherRadar()
     });
 });
+
+let select = null;
+
+function selectStyle(feature) {
+    console.log(`FEATURE: ${feature}`);
+    return selected;
+}
 
 if (settings.gettimedmetars) {
     setInterval(redrawMetars, settings.metarintervalmsec);

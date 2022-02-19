@@ -22,6 +22,7 @@
     "animatedwxurl": "https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0r-t.cgi",
     "addswxurl": "https://www.aviationweather.gov/adds/dataserver_current/httpparam?dataSource=@SOURCE&requestType=retrieve&format=xml&hoursBeforeNow=1.5&mostRecentForEachStation=true&stationString=",
     "addspirepsurl": "https://www.aviationweather.gov/adds/dataserver_current/httpparam?datasource=pireps&requesttype=retrieve&format=xml&hoursBeforeNow=.5",
+    "gettafwithmetar": false,
     "lockownshiptocenter": true,
     "ownshipimage": "blueplane.png",
     "messagetypes": {

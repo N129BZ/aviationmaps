@@ -10,34 +10,6 @@ const WebSocketServer = require('websocket').server;
 const XMLHttpRequest = require("xmlhttprequest").XMLHttpRequest;
 const { XMLParser } = require('fast-xml-parser');
 
-// const MessageTypes = {
-//     metars: {
-//         self: "metars",
-//         type: "METARS",
-//         token: "@SOURCE"
-//     },
-//     tafs: {
-//         self: "tafs",
-//         type: "TAFS",
-//         token: "@SOURCE"
-//     },
-//     pireps: {
-//         self: "pireps",
-//         type: "PIREPS",
-//         token: ""
-//     },
-//     airports: {
-//         self: "airports",
-//         type: "AIRPORTS",
-//         token: ""
-//     },
-//     allairports: {
-//         self: "allairports",
-//         type: "ALLAIRPORTS",
-//         token: ""
-//     }
-// }
-
 const alwaysArray = [
     "response.data.METAR.sky_condition"
 ];
@@ -50,7 +22,7 @@ const xmlParseOptions = {
         if( alwaysArray.indexOf(jpath) !== -1) return true;
     }
 };
-const parser = new XMLParser(xmlParseOptions);
+const xmlparser = new XMLParser(xmlParseOptions);
 
 const settings = readSettingsFile();
 
@@ -174,7 +146,8 @@ function loadAirportsJson(useAllAirports = false) {
         sql = `SELECT ident, type, name, elevation_ft, longitude_deg, latitude_deg ` + 
               `FROM airports ` +
               `WHERE (type = 'large_airport' OR type = 'medium_airport') ` + 
-              `AND iso_country = 'US';`;
+              `AND iso_country = 'US' ` +
+              `ORDER BY iso_region ASC;`;
     }
     
     let jsonout = {
@@ -304,21 +277,32 @@ try {
 
     app.get("/getmetars/:airportlist", (req, res) => {
         let airportlist = req.params.airportlist;
-        setTimeout(() => {
-            getMetars(airportlist)
-        }, 200);
+        let metars = MessageTypes.metars;
+        let url = URL_GET_ADDSWX.replace(metars.token, metars.self) + airportlist;
+        setTimeout(() => {    
+            executeXmlHttpRequest(metars.type, url);
+        }, 80);
         res.writeHead(200);
         res.end();
     });
 
     app.get("/gettaf/:airport", (req, res) => {
-        getTaf(req.params.airport);
+        let airport = req.params.airport;
+        let tafs = MessageTypes.tafs;
+        let url = URL_GET_ADDSWX.replace(tafs.token, tafs.self) + airport;
+        setTimeout(() => {
+            executeXmlHttpRequest(tafs.type, url);
+        }, 80);
         res.writeHead(200);
         res.end();
     });
 
     app.get("/getpireps", (req, res) => {
-        getPireps();
+        let xhr = new XMLHttpRequest();
+        let pireps = MessageTypes.pireps;
+        setTimeout(() => {
+            executeXmlHttpRequest(pireps.type, URL_GET_PIREPS);
+        }, 80);
         res.writeHead(200);
         res.end();
     });
@@ -327,10 +311,8 @@ catch (error) {
     console.log(error);
 }
 
-async function getMetars(airportlist) {
-    let xhr = new XMLHttpRequest();
-    let metars = MessageTypes.metars;
-    let url = URL_GET_ADDSWX.replace(metars.token, metars.self) + airportlist;
+async function executeXmlHttpRequest(messagetype, url) {
+    let xhr = new XMLHttpRequest();    
     xhr.open('GET', url, true);
     xhr.setRequestHeader("Access-Control-Allow-Origin", "*");
     xhr.setRequestHeader('Access-Control-Allow-Methods', '*');
@@ -339,10 +321,10 @@ async function getMetars(airportlist) {
     xhr.onload = () => {
         if (xhr.readyState == 4 && xhr.status == 200) {
 
-            let msgfield = parser.parse(xhr.responseText);
+            let msgfield = xmlparser.parse(xhr.responseText);
             let payload = JSON.stringify(msgfield);
             let message = {
-                type: metars.type,
+                type: messagetype,
                 payload: payload
             };
             const json = JSON.stringify(message);
@@ -351,57 +333,6 @@ async function getMetars(airportlist) {
         }
     };
     xhr.send();
-}
-
-async function getTaf(airport) {
-    let xhr = new XMLHttpRequest();
-    let tafs = MessageTypes.tafs;
-    let url = URL_GET_ADDSWX.replace(tafs.token, tafs.self) + airport;
-    xhr.open('GET', url, true);
-    xhr.setRequestHeader("Access-Control-Allow-Origin", "*");
-    xhr.setRequestHeader('Access-Control-Allow-Methods', '*');
-    xhr.setRequestHeader("Access-Control-Allow-Headers", "*");
-    xhr.responseType = 'xml';
-    xhr.onload = () => {
-        if (xhr.readyState == 4 && xhr.status == 200) {
-
-            let msgfield = parser.parse(xhr.responseText);
-            let payload = JSON.stringify(msgfield);
-            let message = {
-                type: tafs.type,
-                payload: payload
-            };
-            const json = JSON.stringify(message);
-            console.log(message);
-            connection.send(json);
-        }
-    };
-    xhr.send();
-}
-
-async function getPireps() {
-    let xhr = new XMLHttpRequest();
-    let pireps = MessageTypes.pireps;
-    xhr.open('GET', URL_GET_PIREPS, true);
-    xhr.setRequestHeader("Access-Control-Allow-Origin", "*");
-    xhr.setRequestHeader('Access-Control-Allow-Methods', '*');
-    xhr.setRequestHeader("Access-Control-Allow-Headers", "*");
-    xhr.responseType = 'xml';
-    xhr.onload = () => {
-        if (xhr.readyState == 4 && xhr.status == 200) {
-            let msgfield = parser.parse(xhr.responseText);
-            let payload = JSON.stringify(msgfield);
-            let message = {
-                type: pireps.type,
-                payload: payload
-            }
-            const json = JSON.stringify(message);
-            console.log(message);
-            connection.send(json);
-        }
-    };
-    xhr.send();
-    return retval;
 }
 
 function getPositionHistory(response) {

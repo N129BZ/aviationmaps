@@ -7,12 +7,12 @@
   "license": "BSD 3-Clause",
   "dependencies": {
     "cors": "^2.8.5",
+    "csv-parser": "^3.0.0",
     "electron-squirrel-startup": "^1.0.0",
     "express": "^4.17.2",
     "fast-xml-parser": "^4.0.3",
     "fs": "^0.0.1-security",
     "math": "0.0.3",
-    "rpmbuild": "^0.0.23",
     "serve-favicon": "^2.5.0",
     "sqlite3": "^5.0.2",
     "url": "^0.11.0",
