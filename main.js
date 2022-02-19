@@ -9,7 +9,7 @@ let settings = loadSettings();
 const createWindow = () => {
     appWindow = new BrowserWindow({
         width: 1280,
-        height: 720,
+        height: 900,
         webPreferences: {
             nodeIntegration: true,
             contextIsolation: false,
@@ -21,6 +21,10 @@ const createWindow = () => {
         frame: true
     });
     appWindow.loadURL(`http://localhost:${settings.httpport}/`);
+    if (settings.debug) {
+        appWindow.webContents.openDevTools();
+    }
+    appWindow.maximize();
     appWindow.focus();
     const mainMenu = Menu.buildFromTemplate(mainMenuTemplate);
     Menu.setApplicationMenu(mainMenu);

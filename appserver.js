@@ -50,11 +50,11 @@ let connection;
 startWebsocketServer();
 
 function startWebsocketServer() {
-    // http websocket server to forward serial data to browser client
+    // http websocket server to forward weather data to page
     let server = http.createServer(function (request, response) { });
     try {
         server.listen(settings.wsport, function () { });
-        // create the server
+        
         wss = new WebSocketServer({ httpServer: server });
         console.log(`Data forwarding server enabled at port ${settings.wsport}`); 
     }
