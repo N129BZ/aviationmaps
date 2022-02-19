@@ -2,7 +2,7 @@
 
 ### Offline FAA charts include Sectional, Terminal, Helicopter, Caribbean,and both versions of Grand Canyon charts served from mbtiles databases. It can also poll Stratux GPS/AHRS data to plot ownship position and heading over the map, giving basic "moving map" functionality. It can also save position data in a separate history database at user-defined intervals.   
 
-**See https://github.com/N129BZ/ChartMaker for an automated FAA chart mbtiles processor**
+**See https://github.com/N129BZ/chartmaker for an automated FAA chart mbtiles processor**
 
 **Instructions:** Requires node.js. Clone this project, open a terminal in the folder you cloned it to, and enter "npm install". You can then either run the application directly from Visual Studio Code, or enter "npm start" in the terminal. 
 
