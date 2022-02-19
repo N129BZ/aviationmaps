@@ -19,10 +19,36 @@
     "historyDb": "positionhistory.db",
     "airportsDb": "airports.db",
     "stratuxurl": "http://192.168.10.1/getSituation",
-    "weatherurl": "https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0r-t.cgi",
-    "metarurl": "https://www.aviationweather.gov/adds/dataserver_current/httpparam?dataSource=metars&requestType=retrieve&format=xml&hoursBeforeNow=1.5&mostRecentForEachStation=true&stationString=",
-    "tafurl": "https://www.aviationweather.gov/taf/data?ids=###AIRPORT###&format=decoded&metars=off",
-    "pirepurl": "https://www.aviationweather.gov/adds/dataserver_current/httpparam?datasource=pireps&requesttype=retrieve&format=xml&hoursBeforeNow=.5",
+    "animatedwxurl": "https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0r-t.cgi",
+    "addswxurl": "https://www.aviationweather.gov/adds/dataserver_current/httpparam?dataSource=@SOURCE&requestType=retrieve&format=xml&hoursBeforeNow=1.5&mostRecentForEachStation=true&stationString=",
+    "addspirepsurl": "https://www.aviationweather.gov/adds/dataserver_current/httpparam?datasource=pireps&requesttype=retrieve&format=xml&hoursBeforeNow=.5",
     "lockownshiptocenter": true,
-    "ownshipimage": "airplane.png"
+    "ownshipimage": "blueplane.png",
+    "messagetypes": {
+        "metars": {
+            "self": "metars",
+            "type": "METARS",
+            "token": "@SOURCE"
+        },
+        "tafs": {
+            "self": "tafs",
+            "type": "TAFS",
+            "token": "@SOURCE"
+        },
+        "pireps": {
+            "self": "pireps",
+            "type": "PIREPS",
+            "token": ""
+        },
+        "airports": {
+            "self": "airports",
+            "type": "AIRPORTS",
+            "token": ""
+        },
+        "allairports": {
+            "self": "allairports",
+            "type": "ALLAIRPORTS",
+            "token": ""
+        }
+    }
 }

@@ -10,6 +10,34 @@ const WebSocketServer = require('websocket').server;
 const XMLHttpRequest = require("xmlhttprequest").XMLHttpRequest;
 const { XMLParser } = require('fast-xml-parser');
 
+// const MessageTypes = {
+//     metars: {
+//         self: "metars",
+//         type: "METARS",
+//         token: "@SOURCE"
+//     },
+//     tafs: {
+//         self: "tafs",
+//         type: "TAFS",
+//         token: "@SOURCE"
+//     },
+//     pireps: {
+//         self: "pireps",
+//         type: "PIREPS",
+//         token: ""
+//     },
+//     airports: {
+//         self: "airports",
+//         type: "AIRPORTS",
+//         token: ""
+//     },
+//     allairports: {
+//         self: "allairports",
+//         type: "ALLAIRPORTS",
+//         token: ""
+//     }
+// }
+
 const alwaysArray = [
     "response.data.METAR.sky_condition"
 ];
@@ -40,7 +68,9 @@ const DB_GCANYONAO   = `${DB_PATH}/${settings.gcanyonAoDb}`;
 const DB_GCANYONGA   = `${DB_PATH}/${settings.gcanyonGaDb}`;
 const DB_HISTORY     = `${DB_PATH}/${settings.historyDb}`;
 const DB_AIRPORTS    = `${DB_PATH}/${settings.airportsDb}`;
-const URL_GET_METARS = settings.metarurl;
+const URL_GET_ADDSWX = `${settings.addswxurl}`;
+const URL_GET_PIREPS = `${settings.pirepsurl}`;
+const MessageTypes   = settings.messagetypes;
 
 let airportJson = "";
 let wss;
@@ -133,17 +163,18 @@ const histdb = new sqlite3.Database(DB_HISTORY, sqlite3.OPEN_READWRITE, (err) =>
 function loadAirportsJson(useAllAirports = false) {
     let msgtype = "";
     if (useAllAirports) {
-        msgtype = "ALLAIRPORTS";
-        sql = `SELECT ident, type, name, elevation_ft, longitude_deg, latitude_deg ` + 
-              `FROM airports WHERE iso_country = 'US'`;
+        msgtype = MessageTypes.allairports.type;
+        sql = `SELECT ident, type, name, elevation_ft, longitude_deg, latitude_deg, iso_region ` + 
+              `FROM airports ` +
+              `WHERE iso_region LIKE 'US%' ` +
+              `ORDER BY iso_region ASC;`;
     }
     else {
-        msgtype = "AIRPORTS";
+        msgtype = MessageTypes.airports.type;
         sql = `SELECT ident, type, name, elevation_ft, longitude_deg, latitude_deg ` + 
               `FROM airports ` +
               `WHERE (type = 'large_airport' OR type = 'medium_airport') ` + 
-              //`AND ident LIKE 'K%' ` +
-              `AND iso_country = 'US'`;
+              `AND iso_country = 'US';`;
     }
     
     let jsonout = {
@@ -159,7 +190,8 @@ function loadAirportsJson(useAllAirports = false) {
                     "name": row.name,
                     "elev": row.elevation_ft,
                     "lon": row.longitude_deg,
-                    "lat": row.latitude_deg
+                    "lat": row.latitude_deg,
+                    "isoregion": row.iso_region
                 }
                 jsonout.airports.push(thisrecord);
             });
@@ -296,23 +328,21 @@ catch (error) {
 }
 
 async function getMetars(airportlist) {
-    console.log(airportlist);
-    var retval = "";
-    var xhr = new XMLHttpRequest();
-    let url = `${URL_GET_METARS}${airportlist}`;
+    let xhr = new XMLHttpRequest();
+    let metars = MessageTypes.metars;
+    let url = URL_GET_ADDSWX.replace(metars.token, metars.self) + airportlist;
     xhr.open('GET', url, true);
     xhr.setRequestHeader("Access-Control-Allow-Origin", "*");
     xhr.setRequestHeader('Access-Control-Allow-Methods', '*');
     xhr.setRequestHeader("Access-Control-Allow-Headers", "*");
     xhr.responseType = 'xml';
     xhr.onload = () => {
-        let status = xhr.status;
-        if (status == 200) {
+        if (xhr.readyState == 4 && xhr.status == 200) {
 
             let msgfield = parser.parse(xhr.responseText);
             let payload = JSON.stringify(msgfield);
             let message = {
-                type: "METARS",
+                type: metars.type,
                 payload: payload
             };
             const json = JSON.stringify(message);
@@ -323,41 +353,51 @@ async function getMetars(airportlist) {
     xhr.send();
 }
 
-function getTaf(airport) {
-    var retval = "";
-    var xhr = new XMLHttpRequest();
-    let url = settings.tafurl.replace("###AIRPORT###", airport);
+async function getTaf(airport) {
+    let xhr = new XMLHttpRequest();
+    let tafs = MessageTypes.tafs;
+    let url = URL_GET_ADDSWX.replace(tafs.token, tafs.self) + airport;
     xhr.open('GET', url, true);
     xhr.setRequestHeader("Access-Control-Allow-Origin", "*");
-    xhr.setRequestHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+    xhr.setRequestHeader('Access-Control-Allow-Methods', '*');
+    xhr.setRequestHeader("Access-Control-Allow-Headers", "*");
     xhr.responseType = 'xml';
     xhr.onload = () => {
-        let status = xhr.status;
-        if (status == 200) {
-            retval = xhr.responseText;
-            let data = `TAF"=${retval}`;
-            connection.send(data);
-            console.log(data);
+        if (xhr.readyState == 4 && xhr.status == 200) {
+
+            let msgfield = parser.parse(xhr.responseText);
+            let payload = JSON.stringify(msgfield);
+            let message = {
+                type: tafs.type,
+                payload: payload
+            };
+            const json = JSON.stringify(message);
+            console.log(message);
+            connection.send(json);
         }
     };
     xhr.send();
-    return retval;
 }
 
-function getPireps() {
-    var retval = "";
-    var xhr = new XMLHttpRequest();
-    xhr.open('GET', settings.pirepurl, true);
+async function getPireps() {
+    let xhr = new XMLHttpRequest();
+    let pireps = MessageTypes.pireps;
+    xhr.open('GET', URL_GET_PIREPS, true);
     xhr.setRequestHeader("Access-Control-Allow-Origin", "*");
-    xhr.setRequestHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+    xhr.setRequestHeader('Access-Control-Allow-Methods', '*');
+    xhr.setRequestHeader("Access-Control-Allow-Headers", "*");
     xhr.responseType = 'xml';
     xhr.onload = () => {
-        let status = xhr.status;
-        if (status == 200) {
-            retval = xhr.responseText;
-            let data = `PIREPS=${retval}`;
-            connection.send(data);
-            console.log(data);
+        if (xhr.readyState == 4 && xhr.status == 200) {
+            let msgfield = parser.parse(xhr.responseText);
+            let payload = JSON.stringify(msgfield);
+            let message = {
+                type: pireps.type,
+                payload: payload
+            }
+            const json = JSON.stringify(message);
+            console.log(message);
+            connection.send(json);
         }
     };
     xhr.send();

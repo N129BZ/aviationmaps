@@ -34,10 +34,10 @@ let allapfeatures = new ol.Collection();
 
 let airportLayer;
 let airportVectorSource;
-
 let allAirportsLayer;
 let allAirportsVectorSource;
 
+let regionmap = new Map();
 let vfrsecLayer;
 let termLayer;
 let heliLayer;
@@ -53,6 +53,7 @@ let frameRate = 1.0; // frames per second
 let animationId = null;
 let websock;
 let wsOpen = false;
+let MessageTypes = {};
 
 class Metar {
     constructor() {
@@ -69,6 +70,11 @@ class Metar {
         this.sky = [];
     }
 };
+
+const animatecontrol = document.getElementById('wxbuttons');
+const regioncontrol = document.getElementById('isoregion');
+const regionselect = document.getElementById("regionselect");
+
 
 // Icon Markers
 let mvfrMarker = new ol.style.Icon({
@@ -136,7 +142,6 @@ const circleStyle = new ol.style.Style({
     image: circleMarker
 });
 
-
 $.get({
     async: false,
     type: "GET",
@@ -144,6 +149,7 @@ $.get({
     success: (data) => {
         try {
             settings = JSON.parse(data);
+            MessageTypes = settings.messagetypes;
         }
         catch(err) {
             console.log(err);
@@ -153,8 +159,6 @@ $.get({
         console.error(`ERROR PARSING SETTINGS: ${err}`);
     }
 });
-
-
 
 $.get({
     async: true,
@@ -203,20 +207,51 @@ function loadAllAirportsArray(jsonobj) {
             let airport = jsonobj.airports[i];
             let lon = airport.lon;
             let lat = airport.lat;
+            let isoregion = airport.isoregion.replace("US-", "");
+            
             let marker = new ol.Feature({
                 ident: airport.ident,
                 type: airport.type,
                 name: airport.name,
+                isoregion: isoregion,
                 geometry: new ol.geom.Point(ol.proj.fromLonLat([lon, lat])),
             });
             marker.setId(airport.ident);
             marker.setStyle(circleStyle);
             allapfeatures.push(marker);
+            regionmap.set(isoregion, isoregion);
         }
+
+        regionmap[Symbol.iterator] = function* () {
+            yield* [...this.entries()].sort((a, b) => a[1] - b[1]);
+        }
+        regionmap.forEach((region) => { 
+            let option = document.createElement("option");
+            option.value = region;
+            option.text = region;
+            regionselect.appendChild(option);
+        });
     }
     catch(err){
         console.error(err);
     }
+}
+
+regionselect.addEventListener('change', (event) => {
+    let region = event.target.value;
+    selectStateFeatures(region);
+});
+
+function selectStateFeatures(region = "allregions") {
+    allapfeatures.forEach((feature) => {
+        let isoregion = feature.get("isoregion");
+        if (isoregion !== region && region !== "allregions") {
+            feature.setStyle(new ol.style.Style(undefined));
+        }
+        else {
+            feature.setStyle(circleStyle);
+        }
+    });
 }
 
 // immediately initialize the websocket connection
@@ -225,23 +260,26 @@ $(() => {
         let wsurl = `ws://${window.location.hostname}:${settings.wsport}`;
         console.log(`OPENING: ${wsurl}`);
         websock = new WebSocket(wsurl);
-        /*---------------------------------------------------------------
-          The only datatype on this websocket is asynx XML responses,
-          in the format [requestor, xmldata], so we will parse the
-          xmldata message and call the appropriate method in response 
-        -----------------------------------------------------------------*/
         websock.onmessage = function(evt) {
             let message = JSON.parse(evt.data);
             let payload = JSON.parse(message.payload);
-            console.log(payload);
-            if (message.type === "AIRPORTS") {
+            switch (message.type) {
+                case MessageTypes.airports.type:
                 loadAirportsArray(payload);
-            }
-            else if (message.type === "METARS") {
-                processMetars(payload);
-            }
-            else if (message.type === "ALLAIRPORTS") {
+                break;
+            case MessageTypes.allairports.type:
                 loadAllAirportsArray(payload);
+                break;
+            case MessageTypes.metars.type:
+                processMetars(payload);
+                console.log(payload);
+                break;
+            case MessageTypes.tafs.type:
+                console.log(message.payload);
+                break;
+            case MessageTypes.pireps.type:
+                console.log(message.payload);
+                break;
             }
         }
 
@@ -275,7 +313,7 @@ const metaroverlay = new ol.Overlay({
     },
 });
 
-metarcloser.onclick = function () {
+metarcloser.onclick = () => {
     metaroverlay.setPosition(undefined);
     metarcloser.blur();
     return false;
@@ -284,11 +322,9 @@ metarcloser.onclick = function () {
 let airplaneElement = document.getElementById('airplane');
 airplaneElement.style.transform = "rotate(" + last_heading + "deg)";
 airplaneElement.src = `img/${settings.ownshipimage}`;
-airplaneElement.addEventListener("mouseover", evt =>{
+airplaneElement.addEventListener("mouseover", (event) => {
     console.log("MY AIRPLANE!!")
 });
-
-const animatecontrol = document.getElementById('wxbuttons');
 
 $.get({
     async: false,
@@ -459,6 +495,8 @@ map.on('pointermove', (evt) => {
                         metarcontent.innerHTML = html; 
                         showingmetar = true;
                         metaroverlay.setPosition(coordinate);
+
+                        getTaf(ident);
                     }
                     thismetar = null;
                 }
@@ -600,7 +638,7 @@ function resizeDots(zoom) {
 
 wxSource = new ol.source.TileWMS({
     attributions: ['Iowa State University'],
-    url: settings.weatherurl,
+    url: settings.animatedwxurl,
     params: {'LAYERS': 'nexrad-n0r-wmst'},
 });
 
@@ -766,12 +804,18 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
 
     allAirportsLayer.on('change:visible', () => {
         let visible = allAirportsLayer.get('visible');
-        console.log("ALL AIRPORTS ARE " + visible);
+        regioncontrol.style.visibility = visible ? 'visible' : 'hidden';
+        if (visible) {
+            regionselect.options[0].selected = true;
+            regionselect.value = "allregions"; 
+            selectStateFeatures()
+        }
     });
 
     wxLayer.on('change:visible', () => {
         let visible = wxLayer.get('visible');
         animatecontrol.style.visibility = visible ? 'visible' : 'hidden';
+        visible ? playWeatherRadar() : stopWeatherRadar()
     });
 });
 
@@ -793,6 +837,51 @@ function redrawMetars() {
     getMetarsForCurrentView();
     getmetars = false;
 }
+
+// animation stuff
+function threeHoursAgo() {
+    return new Date(Math.round(Date.now() / 3600000) * 3600000 - 3600000 * 3);
+}
+
+function updateInfo() {
+    const el = document.getElementById('info');
+    el.innerHTML = getLocalTimeZone(startDate.toString());
+}
+  
+function setTime() {
+    startDate.setMinutes(startDate.getMinutes() + 15);
+    if (startDate > Date.now()) {
+      startDate = threeHoursAgo();
+    }
+    wxSource.updateParams({'TIME': startDate.toISOString()});
+    updateInfo();
+}
+setTime();
+  
+const stopWeatherRadar = function () {
+    if (animationId !== null) {
+      window.clearInterval(animationId);
+      animationId = null;
+    }
+};
+  
+const playWeatherRadar = function () {
+    stop();
+    animationId = window.setInterval(setTime, 1000 / frameRate);
+};
+  
+const startButton = document.getElementById('play');
+startButton.addEventListener('click', playWeatherRadar, false);
+  
+const stopButton = document.getElementById('pause');
+stopButton.addEventListener('click', stopWeatherRadar, false);
+
+updateInfo();
+
+const convertCtoF = ((temp) => {
+    let num = (temp * 9/5 + 32);
+    return num.toFixed(1);
+});
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -917,48 +1006,4 @@ function getAltimeterSetting(altimeter) {
     return dbl.toFixed(2).toString();
 }
 
-// animation stuff
-function threeHoursAgo() {
-    return new Date(Math.round(Date.now() / 3600000) * 3600000 - 3600000 * 3);
-}
-
-function updateInfo() {
-    const el = document.getElementById('info');
-    el.innerHTML = getLocalTimeZone(startDate.toString());
-}
-  
-function setTime() {
-    startDate.setMinutes(startDate.getMinutes() + 15);
-    if (startDate > Date.now()) {
-      startDate = threeHoursAgo();
-    }
-    wxSource.updateParams({'TIME': startDate.toISOString()});
-    updateInfo();
-}
-setTime();
-  
-const stop = function () {
-    if (animationId !== null) {
-      window.clearInterval(animationId);
-      animationId = null;
-    }
-};
-  
-const play = function () {
-    stop();
-    animationId = window.setInterval(setTime, 1000 / frameRate);
-};
-  
-const startButton = document.getElementById('play');
-startButton.addEventListener('click', play, false);
-  
-const stopButton = document.getElementById('pause');
-stopButton.addEventListener('click', stop, false);
-
-updateInfo();
-
-const convertCtoF = ((temp) => {
-    let num = (temp * 9/5 + 32);
-    return num.toFixed(1);
-});
 
