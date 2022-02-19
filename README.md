@@ -15,10 +15,11 @@
     "gpsintervalmsec": 1000,
     "gettimedmetars": false,
     "metarintervalmsec": 300000,
-    "httpport": 8080,
+    "httpport": 5000,
+    "wsport": 5050,
     "startupzoom": 10,
     "useOSMonlinemap": true,
-    "debug": false,
+    "debug": true,
     "sectionalDb": "Sectional.mbtiles",
     "terminalDb": "Terminal.mbtiles",
     "helicopterDb": "Helicopter.mbtiles",
@@ -28,9 +29,38 @@
     "historyDb": "positionhistory.db",
     "airportsDb": "airports.db",
     "stratuxurl": "http://192.168.10.1/getSituation",
-    "weatherurl": "https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0r-t.cgi",
+    "animatedwxurl": "https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0r-t.cgi",
+    "addswxurl": "https://www.aviationweather.gov/adds/dataserver_current/httpparam?dataSource=@SOURCE&requestType=retrieve&format=xml&hoursBeforeNow=1.5&mostRecentForEachStation=true&stationString=",
+    "addspirepsurl": "https://www.aviationweather.gov/adds/dataserver_current/httpparam?datasource=pireps&requesttype=retrieve&format=xml&hoursBeforeNow=.5",
     "lockownshiptocenter": true,
-    "ownshipimage": "blueplane.png"
+    "ownshipimage": "blueplane.png",
+    "messagetypes": {
+        "metars": {
+            "self": "metars",
+            "type": "METARS",
+            "token": "@SOURCE"
+        },
+        "tafs": {
+            "self": "tafs",
+            "type": "TAFS",
+            "token": "@SOURCE"
+        },
+        "pireps": {
+            "self": "pireps",
+            "type": "PIREPS",
+            "token": ""
+        },
+        "airports": {
+            "self": "airports",
+            "type": "AIRPORTS",
+            "token": ""
+        },
+        "allairports": {
+            "self": "allairports",
+            "type": "ALLAIRPORTS",
+            "token": ""
+        }
+    }
 }
 ```
 **NOTE**: As the position history database is empty at first run of the app, the setting ***"lockownshiptocenter"*** has been set to ***true*** by default. This will allow the application to generate and save some position data so that there will be "last known" longitude and latitude coordinates saved in the database. Once there is at least one position history record, you can change that setting to false so that you can pan around the map without it automatically re-centering ownship to the center. You could also use a sqlite database tool to enter a position history record with your preferred latitude and longitude to be used as a center point when the maps are loaded.      
