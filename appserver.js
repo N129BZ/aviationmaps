@@ -288,63 +288,6 @@ try {
 catch (error) {
     console.log(error);
 }
-    // app.get("/getmetars", (req, res) => {
-    //     let airportlist = req.params.airportlist;
-    //     let metars = MessageTypes.metars;
-    //     let url = URL_GET_ADDSWX.replace(metars.token, metars.self) + airportlist;
-    //     setTimeout(() => {
-    //         downloadCsvFile(metars, airportlist);    
-    //     }, 80);
-    //     res.writeHead(200);
-    //     res.end();
-    // });
-
-    // app.get("/gettaf/:airport", (req, res) => {
-    //     let airport = req.params.airport;
-    //     let tafs = MessageTypes.tafs;
-    //     let url = URL_GET_ADDSWX.replace(tafs.token, tafs.self) + airport;
-    //     setTimeout(() => {
-    //         executeXmlHttpRequest(tafs.type, url);
-    //     }, 80);
-    //     res.writeHead(200);
-    //     res.end();
-    // });
-
-    // app.get("/getpireps", (req, res) => {
-    //     let xhr = new XMLHttpRequest();
-    //     let pireps = MessageTypes.pireps;
-    //     setTimeout(() => {
-    //         executeXmlHttpRequest(pireps.type, URL_GET_PIREPS);
-    //     }, 80);
-    //     res.writeHead(200);
-    //     res.end();
-    // });
-
-
-// async function executeXmlHttpRequest(messagetype, url) {
-//     let xhr = new XMLHttpRequest();    
-//     xhr.open('GET', url, true);
-//     xhr.setHeaders
-//     xhr.setRequestHeader("Access-Control-Allow-Origin", "*");
-//     xhr.setRequestHeader('Access-Control-Allow-Methods', '*');
-//     xhr.setRequestHeader("Access-Control-Allow-Headers", "*");
-//     xhr.responseType = 'xml';
-//     xhr.onload = () => {
-//         if (xhr.readyState == 4 && xhr.status == 200) {
-
-//             let msgfield = xmlparser.parse(xhr.responseText);
-//             let payload = JSON.stringify(msgfield);
-//             let message = {
-//                 type: messagetype,
-//                 payload: payload
-//             };
-//             const json = JSON.stringify(message);
-//             console.log(message);
-//             connection.send(json);
-//         }
-//     };
-//     xhr.send();
-// }
 
 function getPositionHistory(response) {
     let sql = "SELECT * FROM position_history WHERE id IN ( SELECT max( id ) FROM position_history )";
@@ -536,9 +479,7 @@ async function downloadCsvFile(messagetype) {
         if (xhr.readyState == 4 && xhr.status == 200) {
             try {
                 let csvtext = xhr.responseText;
-                setTimeout(() => {
-                    parseCsvTextToJsonObject(messagetype, csvtext);
-                }, 80);
+                parseCsvTextToJsonObject(messagetype, csvtext);
             }
             catch(error) {
                 console.log(error.message);
@@ -558,6 +499,8 @@ async function parseCsvTextToJsonObject(messagetype, csvtext) {
     let parser = parse({from_line: 6, 
                         columns: true,
                         group_columns_by_name: true,
+                        skip_records_with_empty_values: true,
+                        skip_empty_lines: true,
                         skip_lines_with_error: true });
     parser.on('readable', () => {
         let record;
@@ -575,7 +518,7 @@ async function parseCsvTextToJsonObject(messagetype, csvtext) {
         connection.send(json);
     });
     parser.on('error', (err) => {
-        console.error(err.message);
+        console.error(`Error processing msgtype: ${messagetype.type}, ${err.message}`);
     });
     parser.write(csvtext);
     parser.end();

@@ -24,11 +24,16 @@ let currentZoom = 10;
 
 let apfeatures = new ol.Collection();
 let allapfeatures = new ol.Collection();
+let tafFeatures = new ol.Collection();
 
 let airportLayer;
 let airportVectorSource;
+
 let allAirportsLayer;
 let allAirportsVectorSource;
+
+let tafLayer;
+let tafLayerVectorSource;
 
 let regionmap = new Map();
 let vfrsecLayer;
@@ -41,12 +46,16 @@ let osmLayer;
 let wxLayer;
 let wxSource;
 let tiledebug;  
-let startDate = threeHoursAgo();
-let frameRate = 1.0; // frames per second
 let animationId = null;
 let websock;
 let wsOpen = false;
 let MessageTypes = {};
+
+/**
+ * Animation variables 
+ */
+let startDate = threeHoursAgo();
+let frameRate = 1.0; // frames per second
 
 class Metar {
     constructor() {
@@ -115,6 +124,15 @@ let circleMarker = new ol.style.Icon({
     scale: .25
 });
 
+let tafMarker = new ol.style.Icon({
+    crossOrigin: 'anonymous',
+    src: `${URL_SERVER}/img/taf.png`,
+    size: [45, 45],
+    offset: [0, 0],
+    opacity: 1,
+    scale: .25
+});
+
 const vfrStyle = new ol.style.Style({
     image: vfrMarker
 });
@@ -130,6 +148,10 @@ const ifrStyle = new ol.style.Style({
 const lifrStyle = new ol.style.Style({
     image: lifrMarker
 });
+
+const tafStyle = new ol.style.Style({
+    image: tafMarker
+})
 
 const circleStyle = new ol.style.Style({
     image: circleMarker
@@ -302,21 +324,21 @@ $(() => {
     }
 });
 
-let timerID = 0;
+let timerId = 0;
 const kamessage = {
     type: MessageTypes.keepalive.type,
     payload: MessageTypes.keepalive.token
 }
 function keepAlive() { 
-    var timeout = 20000;  
+    var timeout = 30000;  
     if (wsOpen) {  
         websock.send(JSON.stringify(kamessage));  
     }  
-    timerID = setTimeout(keepAlive, timeout);  
+    timerId = setTimeout(keepAlive, timeout);  
 }  
 function cancelKeepAlive() {  
     if (timerId) {  
-        clearTimeout(timerID);  
+        clearTimeout(timerId);  
     }  
 }
 
@@ -685,9 +707,21 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
         zIndex: 11
     });
 
+    tafLayerVectorSource = new ol.source.Vector({
+        features: tafFeatures
+    });
+    tafLayer = new ol.layer.Vector({
+        title: "Terminal Area Forecasts",
+        source: tafLayerVectorSource,
+        visible: false,
+        extent: extent,
+        zIndex: 11
+    });
+        
     map.addLayer(tiledebug);
     map.addLayer(allAirportsLayer);
     map.addLayer(airportLayer); 
+    map.addLayer(tafLayer);
     map.addLayer(wxLayer);
     map.addLayer(caribLayer);
     map.addLayer(gcaoLayer);
@@ -714,6 +748,10 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
             regionselect.value = "allregions"; 
             selectStateFeatures()
         }
+    });
+
+    tafLayer.on('change:visible', () => {
+        let visible = tafLayer.get('visible');
     });
 
     wxLayer.on('change:visible', () => {
