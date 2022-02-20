@@ -626,7 +626,7 @@ function processTafs(tafsobject) {
     if (newtafs !== undefined) {
         try {
             newtafs.forEach((taf) => {
-                let feature = airportVectorSource.getFeatureById(newtaf.station_id);
+                let feature = airportVectorSource.getFeatureById(taf.station_id);
                 if (feature !== null) {
                     feature.set('hastaf', true);
                     feature.set('taf', taf);
