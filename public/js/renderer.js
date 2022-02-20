@@ -15,19 +15,12 @@ let URL_GET_SETTINGS        = `${URL_SERVER}/getsettings`;
 let URL_PUT_HISTORY         = `${URL_SERVER}/puthistory`;
 let URL_GET_AIRPORTS        = `${URL_SERVER}/getairports`;
 let URL_GET_ALL_AIRPORTS    = `${URL_SERVER}/getallairports`;
-let URL_GET_METARS          = `${URL_SERVER}/getmetars`;
-let URL_GET_TAF             = `${URL_SERVER}/gettaf`;
-let URL_GET_PIREPS          = `${URL_SERVER}/getpireps`
 
 let settings = {};
-let getmetars = false;
-let showingmetar = false;
-let processingmetars = false;
-let firstmetarload = false;
-let airportJson = {};
 let last_longitude = 0;
 let last_latitude = 0;
 let last_heading = 0;
+let currentZoom = 10;
 
 let apfeatures = new ol.Collection();
 let allapfeatures = new ol.Collection();
@@ -150,6 +143,7 @@ $.get({
         try {
             settings = JSON.parse(data);
             MessageTypes = settings.messagetypes;
+            currentZoom = settings.startupzoom;
         }
         catch(err) {
             console.log(err);
@@ -238,18 +232,22 @@ function loadAllAirportsArray(jsonobj) {
 }
 
 regionselect.addEventListener('change', (event) => {
-    let region = event.target.value;
-    selectStateFeatures(region);
+    let criteria = event.target.value;
+    selectStateFeatures(criteria);
 });
 
-function selectStateFeatures(region = "allregions") {
+function selectStateFeatures(criteria = "allregions") {
     allapfeatures.forEach((feature) => {
+        let type = feature.get("type");
         let isoregion = feature.get("isoregion");
-        if (isoregion !== region && region !== "allregions") {
-            feature.setStyle(new ol.style.Style(undefined));
+        feature.setStyle(circleStyle);
+        if (criteria == "small_airport" || criteria == "medium_airport" || criteria == "large_airport") {
+            if (type !== criteria) {
+                feature.setStyle(new ol.style.Style(undefined));
+            }
         }
-        else {
-            feature.setStyle(circleStyle);
+        else if (isoregion !== criteria && criteria !== "allregions") {
+            feature.setStyle(new ol.style.Style(undefined));        
         }
     });
 }
@@ -290,17 +288,37 @@ $(() => {
         websock.onopen = function(evt) {
             console.log("Websocket CONNECTED.");
             wsOpen = true;
+            keepAlive();
         }
         
         websock.onclose = function(evt) {
-            console.log("Websocket CLOSED.");
+            cancelKeepAlive();
             wsOpen = false;
+            console.log("Websocket CLOSED.");
         }
     }
     catch (error) {
         console.log(error);
     }
 });
+
+let timerID = 0;
+const kamessage = {
+    type: MessageTypes.keepalive.type,
+    payload: MessageTypes.keepalive.token
+}
+function keepAlive() { 
+    var timeout = 20000;  
+    if (wsOpen) {  
+        websock.send(JSON.stringify(kamessage));  
+    }  
+    timerID = setTimeout(keepAlive, timeout);  
+}  
+function cancelKeepAlive() {  
+    if (timerId) {  
+        clearTimeout(timerID);  
+    }  
+}
 
 const metarpopup = document.getElementById('popup');
 const metarcontent = document.getElementById('popup-content');
@@ -346,48 +364,6 @@ $.get({
     }
 });
 
-function getMetars(airportlist) {
-    if (airportlist.length === 0) {
-        return;
-    }
-
-    let str = "";
-    airportlist.forEach((key) => {
-        str += `${key},`;
-    });
-    let fmtstr = str.slice(0, -1)
-    $.get({
-        async: true,
-        type: "GET",
-        url: `${URL_GET_METARS}/${fmtstr}`,
-        error: function (xhr) {
-            console.log(xhr.status);
-        }
-    });
-}
-
-function getTaf(airport) {
-    $.get({
-        async: true,
-        type: "GET",
-        url: `${URL_GET_TAF}/${airport}`,
-        error: function (xhr) {
-            console.log(xhr.status);
-        }
-    });
-}
-
-function getPireps() {
-    $.get({
-        async: true,
-        type: "GET",
-        url: URL_GET_PIREPS,
-        error: function (xhr) {
-            console.log(xhr.status);
-        }
-    });
-}
-
 let pos = ol.proj.fromLonLat([last_longitude, last_latitude]);
 let ext = [-180, -85, 180, 85];
 let offset = [-18, -18];
@@ -417,163 +393,86 @@ myairplane.setOffset(offset);
 myairplane.setPosition(pos);
 map.addOverlay(myairplane);
 
-let currZoom = map.getView().getZoom();
-
-map.on('moveend', function(e) {
-    if (!showingmetar) {
-        try {
-            let zoom = map.getView().getZoom();
-            currZoom = zoom;
-            if (getmetars) {
-                resizeDots(zoom);
-                getMetarsForCurrentView();
-            }
-        }
-        finally {}
-    }
-});
-
-// map.on('click', (evt) => {
-//     map.forEachFeatureAtPixel(evt.pixel, (feature) => {
-//         if (!feature) {
-//             metarcloser.onclick();
-//             showingmetar = false;
-//         }
-//     });
-// });
-
 map.on('pointermove', (evt) => {
-    if (getmetars) {
-        let hasfeature = false;
-        map.forEachFeatureAtPixel(evt.pixel, (feature) => {
-            if (feature) {
-                hasfeature = true;
-                if (feature.get("hasmetar")) {
-                    let thismetar = feature.get("metar");
-                    let ident = thismetar.id;
-                    let cat = thismetar.cat;
-                    if (cat == undefined || cat == "undefined"){
-                        cat = "VFR";
-                    }
-                    let time = getLocalTimeZone(thismetar.time);
-                    let temp = thismetar.temp;
-                    let dewp = thismetar.dewp;
-                    let windir = thismetar.windir;
-                    let winspd = thismetar.winspd;
-                    let wingst = thismetar.wingst;
-                    let altim = getAltimeterSetting(thismetar.altim);
-                    let vis = thismetar.vis;
-                    let skyconditions = "";
-                    thismetar.sky.forEach((level) => {
-                        let str = replaceAll(level[0], "_", " ");
-                        str = str.charAt(0).toUpperCase() + str.substring(1);
-                        skyconditions += `<b>${str}:</b> ${level[1]}<br />`;
-                    });
-                    let label = `<label class="#class">`;
-                    let css;
-                    switch(cat) {
-                        case "IFR":
-                            css = label.replace("#class", "metarifr");
-                            break;
-                        case "LIFR":
-                            css = label.replace("#class", "metarlifr");
-                            break;
-                        case "MVFR":
-                            css = label.replace("#class", "metarmvfr");
-                            break;
-                        case "VFR":
-                            css = label.replace("#class", "metarvfr");
-                            break;
-                    }
-                    if (ident != "undefined") {
-                        let name = feature.get("name");
-                        let coordinate = evt.coordinate;
-                        let html = `<div id="#mymetar"><pre><code><p>`
-                        html +=   (name != "" && name != "undefined") ? `${css}&nbsp&nbsp${name} - ${cat}&nbsp&nbsp</label><p></p>` : ""
-                        html +=  (ident != "" && ident != "undefined") ? `<b>Station:</b> ${ident}<br/>` : "";
-                        html +=   (time != "" && time != "undefined") ? `<b>Time:</b> ${time}<br/>` : "";
-                        html +=   (temp != "" && temp != "undefined") ? `<b>Temp:</b> ${temp}<br/>` : "";
-                        html +=   (dewp != "" && dewp != "undefined") ?`<b>Dewpoint:</b> ${dewp}<br/>` : "";
-                        html += (windir != "" && windir != "undefined") ? `<b>Wind Dir:</b> ${windir}<br/>` : "";
-                        html += (winspd != "" && winspd != "undefined") ? `<b>Wind Speed:</b> ${winspd} kt<br/>` : "";
-                        html += (wingst != "" && wingst != "undefined") ? `<b>Wind Gust:</b> ${wingst} kt<br/>` : "";
-                        html +=  (altim != "" && altim != "undefined") ? `<b>Altimeter:</b> ${altim} hg<br/>` : "";
-                        html +=    (vis != "" && vis != "undefined") ? `<b>Visibility:</b> ${vis} statute miles<br/>` : "";
-                        html += (skyconditions != "" && skyconditions != "undefined") ? `${skyconditions}` : "";
-                        html += `</p></code></pre></div>`;
-                        metarcontent.innerHTML = html; 
-                        showingmetar = true;
-                        metaroverlay.setPosition(coordinate);
-                        
-                        if (settings.gettafwithmetar) {
-                            getTaf(ident);
-                        }
-                    }
-                    thismetar = null;
+    let hasfeature = false;
+    currentZoom = map.getView().getZoom();
+    resizeDots();
+    map.forEachFeatureAtPixel(evt.pixel, (feature) => {
+        if (feature) {
+            hasfeature = true;
+            if (feature.get("hasmetar")) {
+                let thismetar = feature.get("metar");
+                let ident = thismetar.id;
+                let cat = thismetar.cat;
+                if (cat == undefined || cat == "undefined"){
+                    cat = "VFR";
                 }
+                let time = getLocalTimeZone(thismetar.time);
+                let temp = thismetar.temp;
+                let dewp = thismetar.dewp;
+                let windir = thismetar.windir;
+                let winspd = thismetar.winspd;
+                let wingst = thismetar.wingst;
+                let altim = getAltimeterSetting(thismetar.altim);
+                let vis = thismetar.vis;
+                let skyconditions = "";
+                thismetar.sky.forEach((level) => {
+                    let str = replaceAll(level[0], "_", " ");
+                    str = str.charAt(0).toUpperCase() + str.substring(1);
+                    skyconditions += `<b>${str}:</b> ${level[1]}<br />`;
+                });
+                let label = `<label class="#class">`;
+                let css;
+                switch(cat) {
+                    case "IFR":
+                        css = label.replace("#class", "metarifr");
+                        break;
+                    case "LIFR":
+                        css = label.replace("#class", "metarlifr");
+                        break;
+                    case "MVFR":
+                        css = label.replace("#class", "metarmvfr");
+                        break;
+                    case "VFR":
+                        css = label.replace("#class", "metarvfr");
+                        break;
+                }
+                if (ident != "undefined") {
+                    let name = feature.get("name");
+                    let coordinate = evt.coordinate;
+                    let html = `<div id="#mymetar"><pre><code><p>`
+                    html +=   (name != "" && name != "undefined") ? `${css}&nbsp&nbsp${name} - ${cat}&nbsp&nbsp</label><p></p>` : ""
+                    html +=  (ident != "" && ident != "undefined") ? `<b>Station:</b> ${ident}<br/>` : "";
+                    html +=   (time != "" && time != "undefined") ? `<b>Time:</b> ${time}<br/>` : "";
+                    html +=   (temp != "" && temp != "undefined") ? `<b>Temp:</b> ${temp}<br/>` : "";
+                    html +=   (dewp != "" && dewp != "undefined") ?`<b>Dewpoint:</b> ${dewp}<br/>` : "";
+                    html += (windir != "" && windir != "undefined") ? `<b>Wind Dir:</b> ${windir}<br/>` : "";
+                    html += (winspd != "" && winspd != "undefined") ? `<b>Wind Speed:</b> ${winspd} kt<br/>` : "";
+                    html += (wingst != "" && wingst != "undefined") ? `<b>Wind Gust:</b> ${wingst} kt<br/>` : "";
+                    html +=  (altim != "" && altim != "undefined") ? `<b>Altimeter:</b> ${altim} hg<br/>` : "";
+                    html +=    (vis != "" && vis != "undefined") ? `<b>Visibility:</b> ${vis} statute miles<br/>` : "";
+                    html += (skyconditions != "" && skyconditions != "undefined") ? `${skyconditions}` : "";
+                    html += `</p></code></pre></div>`;
+                    metarcontent.innerHTML = html; 
+                    metaroverlay.setPosition(coordinate);
+                }
+                thismetar = null;
             }
-        });
-        if (!hasfeature) {
-            showingmetar = false
-            metarcloser.onclick();
         }
+    });
+    if (!hasfeature) {
+        metarcloser.onclick();
     }
 });
-
-function getMetarsForCurrentView() {
-    if (!getmetars) {
-        return;
-    }
-    let metarlist = [];
-    let extent = map.getView().calculateExtent(map.getSize());
-    try { 
-        airportVectorSource.forEachFeatureInExtent(extent, (feature) => {
-            if (!feature.get("hasmetar")) {
-                let id = feature.get("ident");
-                if (id.startsWith("K")) {
-                    metarlist.push(id);
-                }
-            }
-        }); 
-    }
-    finally {
-        console.log(metarlist);
-        resizeDots(currZoom);
-        getMetars(metarlist);
-    }
-}
 
 function processMetars(metars) {
-    if (processingmetars) {
-        return;
-    }
-    processingmetars = true;
-    
-    let newmetars = metars.response.data;
-    
-    if (newmetars === undefined) {
-        processingmetars = false;
-        return;
-    }
-
     try {
-        let count = parseInt(newmetars.num_results);
-        if (count > 0) {
-            if (count === 1) {
-                processMetar(newmetars.METAR);
-            }
-            else {
-                newmetars.METAR.forEach((metar) => {    
-                    processMetar(metar);
-                });
-            }
-        }
+        metars.forEach((metar) => {
+            processMetar(metar);
+        });
     }
     catch(err) {
         console.error(err);
-    }
-    finally {
-        processingmetars = false;
     }
 }
 
@@ -639,8 +538,8 @@ function processMetar(metar) {
     }
 }
 
-function resizeDots(zoom) {
-    let rawnum = .044 * zoom;
+function resizeDots() {
+    let rawnum = .044 * currentZoom;
     let newscale = rawnum.toFixed(3)
     vfrMarker.setScale(newscale);
     mvfrMarker.setScale(newscale);
@@ -760,7 +659,7 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
         features: apfeatures
     });
     airportLayer = new ol.layer.Vector({
-        title: "Get Metars",
+        title: "Show Metars",
         source: airportVectorSource,
         visible: false,
         extent: extent,
@@ -807,14 +706,6 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
     });
     map.addControl(layerSwitcher);
 
-    airportLayer.on('change:visible', () => {
-        getmetars = airportLayer.get('visible');
-        if (getmetars) {
-            firstmetarload = true;
-            getMetarsForCurrentView();
-        }
-    });
-    
     allAirportsLayer.on('change:visible', () => {
         let visible = allAirportsLayer.get('visible');
         regioncontrol.style.visibility = visible ? 'visible' : 'hidden';
@@ -839,23 +730,12 @@ function selectStyle(feature) {
     return selected;
 }
 
-if (settings.gettimedmetars) {
-    setInterval(redrawMetars, settings.metarintervalmsec);
-}
-
 if (settings.putpositionhistory) {
     setInterval(putPositionHistory, settings.histintervalmsec);
 }
 
 if (settings.getgpsfromstratux) {
     setInterval(getGpsData, settings.gpsintervalmsec);
-}
-
-function redrawMetars() {
-    console.log("Timed METAR retrieval in progress");
-    getmetars = true;
-    getMetarsForCurrentView();
-    getmetars = false;
 }
 
 // animation stuff
@@ -996,7 +876,7 @@ function getLocalTimeZone(zuludate) {
     }
     if (time.search("Pacific Standard") > -1) {
         retval = time.replace("Pacific Standard Time", "PST");
-        return retval;
+        return retval;wxupdateintervalmsec
     }
     if (time.search("Pacific Daylight") > -1) {
         retval = time.replace("Pacific Daylight Time", "PDT");

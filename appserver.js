@@ -9,6 +9,8 @@ const http = require('http');
 const WebSocketServer = require('websocket').server;
 const XMLHttpRequest = require("xmlhttprequest").XMLHttpRequest;
 const { XMLParser } = require('fast-xml-parser');
+const { parse } = require("csv-parse");
+
 
 const alwaysArray = [
     "response.data.METAR.sky_condition"
@@ -40,13 +42,13 @@ const DB_GCANYONAO   = `${DB_PATH}/${settings.gcanyonAoDb}`;
 const DB_GCANYONGA   = `${DB_PATH}/${settings.gcanyonGaDb}`;
 const DB_HISTORY     = `${DB_PATH}/${settings.historyDb}`;
 const DB_AIRPORTS    = `${DB_PATH}/${settings.airportsDb}`;
-const URL_GET_ADDSWX = `${settings.addswxurl}`;
-const URL_GET_PIREPS = `${settings.pirepsurl}`;
 const MessageTypes   = settings.messagetypes;
 
 let airportJson = "";
 let wss;
 let connection;
+
+
 startWebsocketServer();
 
 function startWebsocketServer() {
@@ -66,9 +68,12 @@ function startWebsocketServer() {
         wss.on('request', function (request) {
             connection = request.accept(null, request.origin);
             console.log("new connection");
-            
-            connection.on('close', function () {
+            runDownloads();
+            connection.on('close', () => {
                 console.log("connection closed");
+            });
+            connection.on('message', data => {
+                console.log(data);
             });
         });
     }
@@ -177,8 +182,13 @@ function loadAirportsJson(useAllAirports = false) {
             type: msgtype,
             payload: payload
         };
-        let outstr = JSON.stringify(message);
-        connection.send(outstr);
+        try {
+            let outstr = JSON.stringify(message);
+            connection.send(outstr);
+        }
+        catch(error) {
+            console.log(error.message);
+        }
     });
 }
 
@@ -274,66 +284,67 @@ try {
         res.writeHead(200);
         res.end();
     });
-
-    app.get("/getmetars/:airportlist", (req, res) => {
-        let airportlist = req.params.airportlist;
-        let metars = MessageTypes.metars;
-        let url = URL_GET_ADDSWX.replace(metars.token, metars.self) + airportlist;
-        setTimeout(() => {    
-            executeXmlHttpRequest(metars.type, url);
-        }, 80);
-        res.writeHead(200);
-        res.end();
-    });
-
-    app.get("/gettaf/:airport", (req, res) => {
-        let airport = req.params.airport;
-        let tafs = MessageTypes.tafs;
-        let url = URL_GET_ADDSWX.replace(tafs.token, tafs.self) + airport;
-        setTimeout(() => {
-            executeXmlHttpRequest(tafs.type, url);
-        }, 80);
-        res.writeHead(200);
-        res.end();
-    });
-
-    app.get("/getpireps", (req, res) => {
-        let xhr = new XMLHttpRequest();
-        let pireps = MessageTypes.pireps;
-        setTimeout(() => {
-            executeXmlHttpRequest(pireps.type, URL_GET_PIREPS);
-        }, 80);
-        res.writeHead(200);
-        res.end();
-    });
 }
 catch (error) {
     console.log(error);
 }
+    // app.get("/getmetars", (req, res) => {
+    //     let airportlist = req.params.airportlist;
+    //     let metars = MessageTypes.metars;
+    //     let url = URL_GET_ADDSWX.replace(metars.token, metars.self) + airportlist;
+    //     setTimeout(() => {
+    //         downloadCsvFile(metars, airportlist);    
+    //     }, 80);
+    //     res.writeHead(200);
+    //     res.end();
+    // });
 
-async function executeXmlHttpRequest(messagetype, url) {
-    let xhr = new XMLHttpRequest();    
-    xhr.open('GET', url, true);
-    xhr.setRequestHeader("Access-Control-Allow-Origin", "*");
-    xhr.setRequestHeader('Access-Control-Allow-Methods', '*');
-    xhr.setRequestHeader("Access-Control-Allow-Headers", "*");
-    xhr.responseType = 'xml';
-    xhr.onload = () => {
-        if (xhr.readyState == 4 && xhr.status == 200) {
+    // app.get("/gettaf/:airport", (req, res) => {
+    //     let airport = req.params.airport;
+    //     let tafs = MessageTypes.tafs;
+    //     let url = URL_GET_ADDSWX.replace(tafs.token, tafs.self) + airport;
+    //     setTimeout(() => {
+    //         executeXmlHttpRequest(tafs.type, url);
+    //     }, 80);
+    //     res.writeHead(200);
+    //     res.end();
+    // });
 
-            let msgfield = xmlparser.parse(xhr.responseText);
-            let payload = JSON.stringify(msgfield);
-            let message = {
-                type: messagetype,
-                payload: payload
-            };
-            const json = JSON.stringify(message);
-            console.log(message);
-            connection.send(json);
-        }
-    };
-    xhr.send();
-}
+    // app.get("/getpireps", (req, res) => {
+    //     let xhr = new XMLHttpRequest();
+    //     let pireps = MessageTypes.pireps;
+    //     setTimeout(() => {
+    //         executeXmlHttpRequest(pireps.type, URL_GET_PIREPS);
+    //     }, 80);
+    //     res.writeHead(200);
+    //     res.end();
+    // });
+
+
+// async function executeXmlHttpRequest(messagetype, url) {
+//     let xhr = new XMLHttpRequest();    
+//     xhr.open('GET', url, true);
+//     xhr.setHeaders
+//     xhr.setRequestHeader("Access-Control-Allow-Origin", "*");
+//     xhr.setRequestHeader('Access-Control-Allow-Methods', '*');
+//     xhr.setRequestHeader("Access-Control-Allow-Headers", "*");
+//     xhr.responseType = 'xml';
+//     xhr.onload = () => {
+//         if (xhr.readyState == 4 && xhr.status == 200) {
+
+//             let msgfield = xmlparser.parse(xhr.responseText);
+//             let payload = JSON.stringify(msgfield);
+//             let message = {
+//                 type: messagetype,
+//                 payload: payload
+//             };
+//             const json = JSON.stringify(message);
+//             console.log(message);
+//             connection.send(json);
+//         }
+//     };
+//     xhr.send();
+// }
 
 function getPositionHistory(response) {
     let sql = "SELECT * FROM position_history WHERE id IN ( SELECT max( id ) FROM position_history )";
@@ -369,7 +380,6 @@ function putPositionHistory(data) {
         }
     });
 }
-
 
 function handleTile(request, response, db) {
     let x = 0;
@@ -432,8 +442,9 @@ function handleTilesets(request, response) {
               `WHERE NOT EXISTS (SELECT * FROM metadata WHERE name='maxzoom')`;
     let found = false;
     let meta = {};
+    let db;
     meta["bounds"] = "";
-    let db = vfrdb;
+
     let parms = url.parse(request.url,true).query
     switch (parms.layer) {
         case "term":
@@ -451,7 +462,9 @@ function handleTilesets(request, response) {
         case "gcga":
             db = gcgadb;
             break;
+        case "vfr":
         default:
+            db = vfrdb;
             break;
     }
 
@@ -494,4 +507,76 @@ function tileToDegree(z, x, y) {
     lat = 180.0 / Math.PI * Math.atan(0.5*(Math.exp(n)-Math.exp(-n)));
     lon = x/Math.pow(2, z)*360.0 - 180.0;
     return [lon, lat]
+}
+
+async function runDownloads() {
+    setTimeout(() => { 
+        downloadCsvFile(settings.messagetypes.metars); 
+    }, 900);
+
+    setTimeout(() => { 
+        downloadCsvFile(settings.messagetypes.tafs); 
+    }, 1800);
+
+    setTimeout(() => { 
+        downloadCsvFile(settings.messagetypes.pireps); 
+    }, 2700);
+}
+
+async function downloadCsvFile(messagetype) {
+    let xhr = new XMLHttpRequest();  
+    let url = settings.addsurrentcsvurl.replace(messagetype.token, messagetype.self);
+    xhr.open('GET', url, true);
+    xhr.setRequestHeader('Content-Type', 'text/csv');
+    xhr.setRequestHeader("Access-Control-Allow-Origin", "*");
+    xhr.setRequestHeader('Access-Control-Allow-Methods', '*');
+    xhr.setRequestHeader("Access-Control-Allow-Headers", "*");
+    xhr.responseType = 'text';
+    xhr.onload = () => {
+        if (xhr.readyState == 4 && xhr.status == 200) {
+            try {
+                let csvtext = xhr.responseText;
+                setTimeout(() => {
+                    parseCsvTextToJsonObject(messagetype, csvtext);
+                }, 80);
+            }
+            catch(error) {
+                console.log(error.message);
+            }
+        }        
+    };
+    try {
+        xhr.send();
+    }
+    catch (error) {
+        console.log(`XMLHttpRequest Error: ${error}`);
+    }
+};
+
+async function parseCsvTextToJsonObject(messagetype, csvtext) {
+    let recordarray = [];
+    let parser = parse({from_line: 6, 
+                        columns: true,
+                        group_columns_by_name: true,
+                        skip_lines_with_error: true });
+    parser.on('readable', () => {
+        let record;
+        while ((record = parser.read()) !== null) {
+          recordarray.push(record);
+        } 
+
+        let payload = JSON.stringify(recordarray);
+        let message = {
+            type: messagetype.type,
+            payload: payload
+        };
+        const json = JSON.stringify(message);
+        while (connection == undefined) {}
+        connection.send(json);
+    });
+    parser.on('error', (err) => {
+        console.error(err.message);
+    });
+    parser.write(csvtext);
+    parser.end();
 }

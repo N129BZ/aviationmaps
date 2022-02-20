@@ -3,8 +3,7 @@
     "histintervalmsec": 15000,
     "getgpsfromstratux": false,
     "gpsintervalmsec": 1000,
-    "gettimedmetars": false,
-    "metarintervalmsec": 300000,
+    "wxupdateintervalmsec": 600000,
     "httpport": 5000,
     "wsport": 5050,
     "startupzoom": 10,
@@ -20,9 +19,8 @@
     "airportsDb": "airports.db",
     "stratuxurl": "http://192.168.10.1/getSituation",
     "animatedwxurl": "https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0r-t.cgi",
-    "addswxurl": "https://www.aviationweather.gov/adds/dataserver_current/httpparam?dataSource=@SOURCE&requestType=retrieve&format=xml&hoursBeforeNow=1.5&mostRecentForEachStation=true&stationString=",
-    "addspirepsurl": "https://www.aviationweather.gov/adds/dataserver_current/httpparam?datasource=pireps&requesttype=retrieve&format=xml&hoursBeforeNow=.5",
-    "gettafwithmetar": false,
+    "addswxurl": "https://aviationweather.gov/adds/dataserver_current/httpparam?dataSource=@SOURCE&requestType=retrieve&format=xml&hoursBeforeNow=1.5&mostRecentForEachStation=true&stationString=",
+    "addsurrentcsvurl": "https://aviationweather.gov/adds/dataserver_current/current/@SOURCE.cache.csv",
     "lockownshiptocenter": true,
     "ownshipimage": "blueplane.png",
     "messagetypes": {
@@ -39,7 +37,7 @@
         "pireps": {
             "self": "pireps",
             "type": "PIREPS",
-            "token": ""
+            "token": "@SOURCW"
         },
         "airports": {
             "self": "airports",
@@ -50,6 +48,11 @@
             "self": "allairports",
             "type": "ALLAIRPORTS",
             "token": ""
+        },
+        "keepalive": {
+            "self": "keepalive",
+            "type": "KEEPALIVE",
+            "token": "((💜))"
         }
     }
 }
