@@ -16,8 +16,8 @@ let URL_GET_GCGA_TILE       = `${URL_SERVER}/tiles/gcgatile/{z}/{x}/{-y}.png`;
 let URL_GET_HISTORY         = `${URL_SERVER}/gethistory`;
 let URL_GET_SETTINGS        = `${URL_SERVER}/getsettings`;
 let URL_PUT_HISTORY         = `${URL_SERVER}/puthistory`;
+//let URL_GET_AIRPORTS        = `${URL_SERVER}/getairports`;
 let URL_GET_AIRPORTS        = `${URL_SERVER}/getairports`;
-let URL_GET_ALL_AIRPORTS    = `${URL_SERVER}/getallairports`;
 
 /**
  * global properties
@@ -208,15 +208,6 @@ $.get({
     type: "GET",
     url: URL_GET_AIRPORTS,
     error: function (request, status, err) {
-        console.error(`ERROR GETTING AIRPORTS: ${err}`);
-    }
-});
-/*-------------------------------------------------------*/
-$.get({
-    async: true,
-    type: "GET",
-    url: URL_GET_ALL_AIRPORTS,
-    error: function (request, status, err) {
         console.error(`ERROR GETTING ALL AIRPORTS: ${err}`);
     }
 });
@@ -224,35 +215,9 @@ $.get({
 
 /**
  * Called by a $get action to load static list
- * @param {*} jsonobj: JSON object 
- */
-function loadAirportsArray(jsonobj) {
-    try {
-        for (let i=0; i< jsonobj.airports.length; i++) {
-            let airport = jsonobj.airports[i];
-            let lon = airport.lon;
-            let lat = airport.lat;
-            let marker = new ol.Feature({
-                ident: airport.ident,
-                type: airport.type,
-                name: airport.name,
-                elevation: airport.elev,
-                geometry: new ol.geom.Point(ol.proj.fromLonLat([lon, lat])),
-            });
-            marker.setId(airport.ident);
-            marker.setStyle(vfrStyle);
-            apfeatures.push(marker);
-        };
-    }
-    catch(err){
-        console.error(err);
-    }
-}
-/**
- * Called by a $get action to load static list
  * @param {\} jsonobj: JSON object 
  */
-function loadAllAirportsArray(jsonobj) {
+function loadAirportsCollection(jsonobj) {
     try {
         for (let i=0; i< jsonobj.airports.length; i++) {
             let airport = jsonobj.airports[i];
@@ -265,12 +230,25 @@ function loadAllAirportsArray(jsonobj) {
                 type: airport.type,
                 name: airport.name,
                 isoregion: isoregion,
-                geometry: new ol.geom.Point(ol.proj.fromLonLat([lon, lat])),
+                geometry: new ol.geom.Point(ol.proj.fromLonLat([lon, lat]))
             });
             marker.setId(airport.ident);
             marker.setStyle(circleStyle);
             allapfeatures.push(marker);
             regionmap.set(isoregion, isoregion);
+            
+            if (airport.type == "large_airport" || airport.type == "medium_airport") {
+                let apmarker = new ol.Feature({
+                    ident: airport.ident,
+                    type: airport.type,
+                    name: airport.name,
+                    isoregion: isoregion,
+                    geometry: new ol.geom.Point(ol.proj.fromLonLat([lon, lat]))
+                });
+                apmarker.setId(airport.ident);
+                apmarker.setStyle(vfrStyle);
+                apfeatures.push(marker);
+            }
         }
 
         regionmap[Symbol.iterator] = function* () {
@@ -329,10 +307,7 @@ $(() => {
             let payload = JSON.parse(message.payload);
             switch (message.type) {
                 case MessageTypes.airports.type:
-                loadAirportsArray(payload);
-                break;
-            case MessageTypes.allairports.type:
-                loadAllAirportsArray(payload);
+                loadAirportsCollection(payload);
                 break;
             case MessageTypes.metars.type:
                 processMetars(payload);

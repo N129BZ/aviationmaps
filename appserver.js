@@ -134,24 +134,13 @@ const histdb = new sqlite3.Database(DB_HISTORY, sqlite3.OPEN_READWRITE, (err) =>
     }
 });
 
-function loadAirportsJson(useAllAirports = false) {
+function loadAirportsJson() {
     let msgtype = "";
-    if (useAllAirports) {
-        msgtype = MessageTypes.allairports.type;
-        sql = `SELECT ident, type, name, elevation_ft, longitude_deg, latitude_deg, iso_region ` + 
-              `FROM airports ` +
-              `WHERE iso_region LIKE 'US%' ` +
-              `ORDER BY iso_region ASC;`;
-    }
-    else {
-        msgtype = MessageTypes.airports.type;
-        sql = `SELECT ident, type, name, elevation_ft, longitude_deg, latitude_deg ` + 
-              `FROM airports ` +
-              `WHERE (type = 'large_airport' OR type = 'medium_airport') ` + 
-              `AND iso_country = 'US' ` +
-              `ORDER BY iso_region ASC;`;
-    }
-    
+    msgtype = MessageTypes.airports.type;
+    sql = `SELECT ident, type, name, elevation_ft, longitude_deg, latitude_deg, iso_region ` + 
+            `FROM airports ` +
+            `WHERE iso_region LIKE 'US%' ` +
+            `ORDER BY iso_region ASC;`;
     let jsonout = {
         "airports": []
     };
@@ -268,15 +257,7 @@ try {
 
     app.get("/getairports", (req, res) => {
         setTimeout(() => {
-            loadAirportsJson(false)
-        }, 200);
-        res.writeHead(200);
-        res.end();
-    });
-    
-    app.get("/getallairports", (req, res) => {
-        setTimeout(() => {
-            loadAirportsJson(true)
+            loadAirportsJson()
         }, 200);
         res.writeHead(200);
         res.end();
@@ -406,7 +387,7 @@ function handleTilesets(request, response) {
         default:
             db = vfrdb;
             break;
-    }
+    }false
 
     db.all(sql, [], (err, rows) => {
         rows.forEach(row => {

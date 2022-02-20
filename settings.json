@@ -44,11 +44,6 @@
             "type": "AIRPORTS",
             "token": ""
         },
-        "allairports": {
-            "self": "allairports",
-            "type": "ALLAIRPORTS",
-            "token": ""
-        },
         "keepalive": {
             "self": "keepalive",
             "type": "KEEPALIVE",
