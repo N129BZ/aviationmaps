@@ -982,7 +982,7 @@ function getGpsData() {
         pos = ol.proj.fromLonLat([data.GPSLongitude, data.GPSLatitude]);
         if (data.GPSLongitude !== 0 && data.GPSLatitude !== 0) {
             myairplane.setOffset(offset);
-            myairplane.setPosition(pos);m
+            myairplane.setPosition(pos);
             lng = data.GPSLongitude;
             lat = data.GPSLatitude;
             alt = data.GPSAltitudeMSL;
