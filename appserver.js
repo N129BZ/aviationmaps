@@ -9,8 +9,6 @@ const http = require('http');
 const WebSocketServer = require('websocket').server;
 const XMLHttpRequest = require("xmlhttprequest").XMLHttpRequest;
 const { XMLParser } = require('fast-xml-parser');
-const { parse } = require("csv-parse");
-
 
 const alwaysArray = [
     "response.data.METAR.sky_condition"
@@ -44,7 +42,6 @@ const DB_HISTORY     = `${DB_PATH}/${settings.historyDb}`;
 const DB_AIRPORTS    = `${DB_PATH}/${settings.airportsDb}`;
 const MessageTypes   = settings.messagetypes;
 
-let airportJson = "";
 let wss;
 let connection;
 
@@ -454,72 +451,45 @@ function tileToDegree(z, x, y) {
 
 async function runDownloads() {
     setTimeout(() => { 
-        downloadCsvFile(settings.messagetypes.metars); 
+        downloadXmlFile(settings.messagetypes.metars); 
     }, 900);
 
     setTimeout(() => { 
-        downloadCsvFile(settings.messagetypes.tafs); 
+        downloadXmlFile(settings.messagetypes.tafs); 
     }, 1800);
 
     setTimeout(() => { 
-        downloadCsvFile(settings.messagetypes.pireps); 
+        downloadXmlFile(settings.messagetypes.pireps); 
     }, 2700);
 }
 
-async function downloadCsvFile(messagetype) {
+async function downloadXmlFile(xmlmessage) {
     let xhr = new XMLHttpRequest();  
-    let url = settings.addsurrentcsvurl.replace(messagetype.token, messagetype.self);
+    let url = settings.addsurrentxmlurl.replace(xmlmessage.token, xmlmessage.self);
     xhr.open('GET', url, true);
     xhr.setRequestHeader('Content-Type', 'text/csv');
     xhr.setRequestHeader("Access-Control-Allow-Origin", "*");
     xhr.setRequestHeader('Access-Control-Allow-Methods', '*');
     xhr.setRequestHeader("Access-Control-Allow-Headers", "*");
-    xhr.responseType = 'text';
+    xhr.responseType = 'xml';
     xhr.onload = () => {
         if (xhr.readyState == 4 && xhr.status == 200) {
-            try {
-                let csvtext = xhr.responseText;
-                parseCsvTextToJsonObject(messagetype, csvtext);
-            }
-            catch(error) {
-                console.log(error.message);
-            }
-        }        
+
+            let msgfield = xmlparser.parse(xhr.responseText);
+            let payload = JSON.stringify(msgfield);
+            let message = {
+                type: xmlmessage.type,
+                payload: payload
+            };
+            const json = JSON.stringify(message);
+            fs.writeFileSync(`${DB_PATH}/${xmlmessage.self}.json`, json);
+            connection.send(json);
+        }
     };
-    try {
+    try { 
         xhr.send();
     }
     catch (error) {
-        console.log(`XMLHttpRequest Error: ${error}`);
+        console.log(`Error getting message type ${xmlmessage.type}: ${error}`);
     }
-};
-
-async function parseCsvTextToJsonObject(messagetype, csvtext) {
-    let recordarray = [];
-    let parser = parse({from_line: 6, 
-                        columns: true,
-                        group_columns_by_name: true,
-                        skip_records_with_empty_values: true,
-                        skip_empty_lines: true,
-                        skip_lines_with_error: true });
-    parser.on('readable', () => {
-        let record;
-        while ((record = parser.read()) !== null) {
-          recordarray.push(record);
-        } 
-
-        let payload = JSON.stringify(recordarray);
-        let message = {
-            type: messagetype.type,
-            payload: payload
-        };
-        const json = JSON.stringify(message);
-        while (connection == undefined) {}
-        connection.send(json);
-    });
-    parser.on('error', (err) => {
-        console.error(`Error processing msgtype: ${messagetype.type}, ${err.message}`);
-    });
-    parser.write(csvtext);
-    parser.end();
 }

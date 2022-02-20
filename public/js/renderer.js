@@ -1,5 +1,8 @@
 'use strict';
 
+/**
+ * Build-up of all of the application urls 
+ */
 let URL_HOST_BASE           = window.location.hostname + (window.location.port ? ':' + window.location.port : '');
 let URL_HOST_PROTOCOL       = window.location.protocol + "//";
 let URL_SERVER              = `${URL_HOST_PROTOCOL}${URL_HOST_BASE}`;
@@ -16,26 +19,47 @@ let URL_PUT_HISTORY         = `${URL_SERVER}/puthistory`;
 let URL_GET_AIRPORTS        = `${URL_SERVER}/getairports`;
 let URL_GET_ALL_AIRPORTS    = `${URL_SERVER}/getallairports`;
 
+/**
+ * global properties
+ */
 let settings = {};
 let last_longitude = 0;
 let last_latitude = 0;
 let last_heading = 0;
 let currentZoom = 10;
 
+/**
+ * ol.Collections hold features like
+ * metars, tafs, airport info, etc.
+ */
 let apfeatures = new ol.Collection();
 let allapfeatures = new ol.Collection();
 let tafFeatures = new ol.Collection();
 
+/**
+ * Persistent airport layer, this layer
+ * is limited to medium & large airports
+ */
 let airportLayer;
 let airportVectorSource;
 
+/**
+ * Persistent all airports layer, this layer 
+ * has all 22,000 FAA recognized US airports
+ */
 let allAirportsLayer;
 let allAirportsVectorSource;
 
+/**
+ * TAF layer
+ */
 let tafLayer;
 let tafLayerVectorSource;
+/*---------------------------*/
 
-let regionmap = new Map();
+/**
+ * OpenLayers Layer objects
+ */
 let vfrsecLayer;
 let termLayer;
 let heliLayer;
@@ -46,7 +70,11 @@ let osmLayer;
 let wxLayer;
 let wxSource;
 let tiledebug;  
-let animationId = null;
+
+/**
+ * Websocket object, flag, and message definition
+ * JSON object that is filled by returned settings
+ */
 let websock;
 let wsOpen = false;
 let MessageTypes = {};
@@ -54,31 +82,21 @@ let MessageTypes = {};
 /**
  * Animation variables 
  */
+let animationId = null;
 let startDate = threeHoursAgo();
 let frameRate = 1.0; // frames per second
-
-class Metar {
-    constructor() {
-        this.id = "";
-        this.cat = "";
-        this.time = "";
-        this.temp = "";
-        this.dewp = "";
-        this.windir = "";
-        this.winspd = "";
-        this.wingst = "";
-        this.altim = "",
-        this.vis = "";
-        this.sky = [];
-    }
-};
-
 const animatecontrol = document.getElementById('wxbuttons');
+
+/**
+ * Controls for dropdown select when viewing all airports
+ */
 const regioncontrol = document.getElementById('isoregion');
 const regionselect = document.getElementById("regionselect");
+let regionmap = new Map();
 
-
-// Icon Markers
+/**
+ * Icon markers for different weather categories 
+ */
 let mvfrMarker = new ol.style.Icon({
     crossOrigin: 'anonymous',
     src: `${URL_SERVER}/img/mvfr.png`,
@@ -87,7 +105,7 @@ let mvfrMarker = new ol.style.Icon({
     opacity: 1,
     scale: .25
 });
-
+/*--------------------------------------*/
 let vfrMarker = new ol.style.Icon({
     crossOrigin: 'anonymous',
     src: `${URL_SERVER}/img/vfr.png`,
@@ -96,7 +114,7 @@ let vfrMarker = new ol.style.Icon({
     opacity: 1,
     scale: .25
 });
-
+/*--------------------------------------*/
 let ifrMarker = new ol.style.Icon({
     crossOrigin: 'anonymous',
     src: `${URL_SERVER}/img/ifr.png`,
@@ -105,7 +123,7 @@ let ifrMarker = new ol.style.Icon({
     opacity: 1,
     scale: .25
 });
-
+/*--------------------------------------*/
 let lifrMarker = new ol.style.Icon({
     crossOrigin: 'anonymous',
     src: `${URL_SERVER}/img/lifr.png`,
@@ -114,7 +132,16 @@ let lifrMarker = new ol.style.Icon({
     opacity: 1,
     scale: .25
 });
-
+/*--------------------------------------*/
+let tafMarker = new ol.style.Icon({
+    crossOrigin: 'anonymous',
+    src: `${URL_SERVER}/img/taf.png`,
+    size: [45, 45],
+    offset: [0, 0],
+    opacity: 1,
+    scale: .25
+});
+/*--------------------------------------*/
 let circleMarker = new ol.style.Icon({
     crossOrigin: 'anonymous',
     src: `${URL_SERVER}/img/dot.png`,
@@ -124,39 +151,39 @@ let circleMarker = new ol.style.Icon({
     scale: .25
 });
 
-let tafMarker = new ol.style.Icon({
-    crossOrigin: 'anonymous',
-    src: `${URL_SERVER}/img/taf.png`,
-    size: [45, 45],
-    offset: [0, 0],
-    opacity: 1,
-    scale: .25
-});
 
+/**
+ * Marker style objects 
+ */
 const vfrStyle = new ol.style.Style({
     image: vfrMarker
 });
-
+/*--------------------------------------*/
 const mvfrStyle = new ol.style.Style({
     image: mvfrMarker
 });
-
+/*--------------------------------------*/
 const ifrStyle = new ol.style.Style({
     image: ifrMarker
 });
-
+/*--------------------------------------*/
 const lifrStyle = new ol.style.Style({
     image: lifrMarker
 });
-
+/*--------------------------------------*/
 const tafStyle = new ol.style.Style({
     image: tafMarker
 })
-
+/*--------------------------------------*/
 const circleStyle = new ol.style.Style({
     image: circleMarker
 });
 
+
+/** 
+ * Asynchronous $gets for static data like
+ * airport lists, application settings
+ */
 $.get({
     async: false,
     type: "GET",
@@ -175,7 +202,7 @@ $.get({
         console.error(`ERROR PARSING SETTINGS: ${err}`);
     }
 });
-
+/*-------------------------------------------------------*/
 $.get({
     async: true,
     type: "GET",
@@ -184,7 +211,7 @@ $.get({
         console.error(`ERROR GETTING AIRPORTS: ${err}`);
     }
 });
-
+/*-------------------------------------------------------*/
 $.get({
     async: true,
     type: "GET",
@@ -193,7 +220,12 @@ $.get({
         console.error(`ERROR GETTING ALL AIRPORTS: ${err}`);
     }
 });
+/*-------------------------------------------------------*/
 
+/**
+ * Called by a $get action to load static list
+ * @param {*} jsonobj: JSON object 
+ */
 function loadAirportsArray(jsonobj) {
     try {
         for (let i=0; i< jsonobj.airports.length; i++) {
@@ -216,7 +248,10 @@ function loadAirportsArray(jsonobj) {
         console.error(err);
     }
 }
-
+/**
+ * Called by a $get action to load static list
+ * @param {\} jsonobj: JSON object 
+ */
 function loadAllAirportsArray(jsonobj) {
     try {
         for (let i=0; i< jsonobj.airports.length; i++) {
@@ -229,7 +264,7 @@ function loadAllAirportsArray(jsonobj) {
                 ident: airport.ident,
                 type: airport.type,
                 name: airport.name,
-                isoregion: isoregion,
+                isoregion: isoregion,over
                 geometry: new ol.geom.Point(ol.proj.fromLonLat([lon, lat])),
             });
             marker.setId(airport.ident);
@@ -253,11 +288,18 @@ function loadAllAirportsArray(jsonobj) {
     }
 }
 
+/**
+ * Region dropdown select event
+ */
 regionselect.addEventListener('change', (event) => {
     let criteria = event.target.value;
     selectStateFeatures(criteria);
 });
 
+/**
+ * Called by select event to manipulate features
+ * @param {*} criteria: string
+ */
 function selectStateFeatures(criteria = "allregions") {
     allapfeatures.forEach((feature) => {
         let type = feature.get("type");
@@ -274,7 +316,9 @@ function selectStateFeatures(criteria = "allregions") {
     });
 }
 
-// immediately initialize the websocket connection
+/**
+ * JQuery method to immediately initialize the websocket connection
+ */
 $(() => { 
     try {
         let wsurl = `ws://${window.location.hostname}:${settings.wsport}`;
@@ -292,10 +336,9 @@ $(() => {
                 break;
             case MessageTypes.metars.type:
                 processMetars(payload);
-                console.log(payload);
                 break;
             case MessageTypes.tafs.type:
-                console.log(message.payload);
+                processTafs(payload);
                 break;
             case MessageTypes.pireps.type:
                 console.log(message.payload);
@@ -324,6 +367,9 @@ $(() => {
     }
 });
 
+/**
+ * Heartbeat routine to keep websocket "hot"
+ */
 let timerId = 0;
 const kamessage = {
     type: MessageTypes.keepalive.type,
@@ -342,6 +388,9 @@ function cancelKeepAlive() {
     }  
 }
 
+/**
+ * Metar popup object
+ */
 const metarpopup = document.getElementById('popup');
 const metarcontent = document.getElementById('popup-content');
 const metarcloser = document.getElementById('popup-closer');
@@ -352,13 +401,15 @@ const metaroverlay = new ol.Overlay({
       duration: 500,
     },
 });
-
 metarcloser.onclick = () => {
     metaroverlay.setPosition(undefined);
     metarcloser.blur();
     return false;
 };
 
+/**
+ * Ownship image 
+ */
 let airplaneElement = document.getElementById('airplane');
 airplaneElement.style.transform = "rotate(" + last_heading + "deg)";
 airplaneElement.src = `img/${settings.ownshipimage}`;
@@ -366,6 +417,12 @@ airplaneElement.addEventListener("mouseover", (event) => {
     console.log("MY AIRPLANE!!")
 });
 
+/**
+ * Initial position latitude & longitude,
+ * stored in the history.db sqlite file.
+ * This will "default" the ownship image
+ * to the last known position on the map. 
+ */
 $.get({
     async: false,
     type: "GET",
@@ -385,11 +442,17 @@ $.get({
         console.error(xhr.status, thrownError);
     }
 });
-
 let pos = ol.proj.fromLonLat([last_longitude, last_latitude]);
+
+/**
+ * Viewport extent for setting up map view
+ */
 let ext = [-180, -85, 180, 85];
 let offset = [-18, -18];
 
+/**
+ * The scale of miles shown on lower left corner of map
+ */
 const scaleLine = new ol.control.ScaleLine({
     units: 'imperial',
     bar: true,
@@ -397,6 +460,9 @@ const scaleLine = new ol.control.ScaleLine({
     minWidth: 140
 });
 
+/**
+ * The map object that gets put in index.html <div> element
+ */
 const map = new ol.Map({
     target: 'map',
     view: new ol.View({
@@ -408,6 +474,9 @@ const map = new ol.Map({
     overlays: [metaroverlay]
 });
 
+/**
+ * The actual positioning of the ownship image feature
+ */
 const myairplane = new ol.Overlay({
     element: airplaneElement
 });
@@ -415,6 +484,9 @@ myairplane.setOffset(offset);
 myairplane.setPosition(pos);
 map.addOverlay(myairplane);
 
+/**
+ * Event to handle Metar popup or closure
+ */
 map.on('pointermove', (evt) => {
     let hasfeature = false;
     currentZoom = map.getView().getZoom();
@@ -424,25 +496,40 @@ map.on('pointermove', (evt) => {
             hasfeature = true;
             if (feature.get("hasmetar")) {
                 let thismetar = feature.get("metar");
-                let ident = thismetar.id;
-                let cat = thismetar.cat;
+                let ident = thismetar.station_id;
+                let cat = thismetar.flight_category;
                 if (cat == undefined || cat == "undefined"){
                     cat = "VFR";
                 }
-                let time = getLocalTimeZone(thismetar.time);
-                let temp = thismetar.temp;
-                let dewp = thismetar.dewp;
-                let windir = thismetar.windir;
-                let winspd = thismetar.winspd;
-                let wingst = thismetar.wingst;
-                let altim = getAltimeterSetting(thismetar.altim);
-                let vis = thismetar.vis;
+                let time = getLocalTimeZone(thismetar.observation_time);
+                let temp = convertCtoF(thismetar.temp_c);
+                let dewp = convertCtoF(thismetar.dewpoint_c);
+                let windir = thismetar.wind_dir_degrees;
+                let winspd = thismetar.wind_speed_kt + "";
+                let wingst = thismetar.wind_gust_kt + ""; 
+                let altim = getAltimeterSetting(thismetar.altim_in_hg);
+                let vis = thismetar.visibility_statute_mi;
                 let skyconditions = "";
-                thismetar.sky.forEach((level) => {
-                    let str = replaceAll(level[0], "_", " ");
-                    str = str.charAt(0).toUpperCase() + str.substring(1);
-                    skyconditions += `<b>${str}:</b> ${level[1]}<br />`;
-                });
+                try {
+                    let sky = [];
+                    if (thismetar.sky_condition !== undefined) {    
+                        thismetar.sky_condition.forEach((condition) => {
+                            let map = Object.entries(condition);
+                            map.forEach((item) => {
+                                sky.push(item);  
+                            });
+                        });
+                    }
+                    sky.forEach((level) => {
+                        let str = replaceAll(level[0], "_", " ");
+                        str = str.charAt(0).toUpperCase() + str.substring(1);
+                        skyconditions += `<b>${str}:</b> ${level[1]}<br />`;
+                    });
+                }
+                catch(error){
+                    console.log(error.message);
+                }
+                
                 let label = `<label class="#class">`;
                 let css;
                 switch(cat) {
@@ -487,79 +574,75 @@ map.on('pointermove', (evt) => {
     }
 });
 
-function processMetars(metars) {
-    try {
-        metars.forEach((metar) => {
-            processMetar(metar);
-        });
-    }
-    catch(err) {
-        console.error(err);
-    }
-}
-
-function processMetar(metar) {
-    let newmetar = new Metar();
-    newmetar.id = metar.station_id;
-    newmetar.cat = metar.flight_category;
-    newmetar.time = metar.observation_time;
-    
-    let tF = convertCtoF(metar.temp_c);
-    newmetar.temp = `${metar.temp_c}°C  (${tF}°F)`;
-    
-    let dF = convertCtoF(metar.dewpoint_c)
-    newmetar.dewp = `${metar.dewpoint_c}°C  (${dF}°F)`;
-
-    newmetar.windir = metar.wind_dir_degrees;
-    newmetar.winspd = metar.wind_speed_kt + "";
-    newmetar.wingst = metar.wind_gust_kt + "";
-    newmetar.altim = metar.altim_in_hg;
-    newmetar.vis = metar.visibility_statute_mi;
-    try {
-        if (metar.sky_condition !== undefined) {    
-            metar.sky_condition.forEach((condition) => {
-                let map = Object.entries(condition);
-                map.forEach((item) => {
-                    newmetar.sky.push(item);  
-                });
+/**
+ * 
+ * @param {*} metarsobject: JSON object with LOTS of metars
+ */
+function processMetars(metarsobject) {
+    let newmetars = metarsobject.response.data.METAR;
+    if (newmetars !== undefined) {
+        try {
+            newmetars.forEach((metar) => {    
+                let feature = airportVectorSource.getFeatureById(metar.station_id);
+                if (feature !== null) {
+                    feature.set('hasmetar', true);
+                    feature.set('metar', metar);
+                    try {
+                        switch (metar.flight_category) {
+                            case 'MVFR':
+                                feature.setStyle(mvfrStyle);
+                                break;
+                            case 'LIFR':
+                                feature.setStyle(lifrStyle);
+                                break;
+                            case 'IFR':
+                                feature.setStyle(ifrStyle)
+                                break;
+                            case 'VFR':
+                            default:
+                                feature.setStyle(vfrStyle);
+                                break;
+                        }
+                        feature.changed();
+                    }
+                    catch(err){
+                        
+                    }
+                }
             });
         }
-    }
-    catch(err){
-        console.error(err);
-    }
-
-    let feature = airportVectorSource.getFeatureById(newmetar.id);
-    if (feature !== null) {
-        feature.set('hasmetar', true);
-        feature.set('metar', newmetar);
-        try {
-            switch (newmetar.cat) {
-                case 'MVFR':
-                    feature.setStyle(mvfrStyle);
-                    break;
-                case 'LIFR':
-                    feature.setStyle(lifrStyle);
-                    break;
-                case 'IFR':
-                    feature.setStyle(ifrStyle)
-                    break;
-                case 'VFR':
-                default:
-                    feature.setStyle(vfrStyle);
-                    break;
-            }
-            feature.changed();
-        }
-        catch(err){
-            console.error(err);
-        }
-        finally{
-            
+        catch(error) {
+            console.log(error.message);
         }
     }
 }
 
+/**
+ * 
+ * @param {*} tafsobject: JSON object with LOTS of tafs 
+ */
+function processTafs(tafsobject) {
+    let newtafs = tafsobject.response.data.TAF;
+    if (newtafs !== undefined) {
+        try {
+            newtafs.forEach((taf) => {
+                let feature = airportVectorSource.getFeatureById(newtaf.station_id);
+                if (feature !== null) {
+                    feature.set('hastaf', true);
+                    feature.set('taf', taf);
+                }
+            });
+        }
+        catch (error){
+            console.log(error.message);
+        }
+    }
+}
+
+/**
+ * This routine adjusts feature "dot" image 
+ * sizes, depending on current zoom level
+ */
 function resizeDots() {
     let rawnum = .044 * currentZoom;
     let newscale = rawnum.toFixed(3)
@@ -570,12 +653,18 @@ function resizeDots() {
     circleMarker.setScale(newscale);
 }
 
+/**
+ * Tile source for animated weather
+ */
 wxSource = new ol.source.TileWMS({
     attributions: ['Iowa State University'],
     url: settings.animatedwxurl,
     params: {'LAYERS': 'nexrad-n0r-wmst'},
 });
 
+/**
+ * jQuery $get all layer tile data
+ */
 $.get(`${URL_GET_TILESETS}`, (data) => {
     let extent = ol.proj.transformExtent(ext, 'EPSG:4326', 'EPSG:3857')
     
@@ -761,31 +850,50 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
     });
 });
 
+/**
+ * This allows a clicked feature to raise an event
+ */
 let select = null;
-
 function selectStyle(feature) {
     console.log(`FEATURE: ${feature}`);
     return selected;
 }
 
+/**
+ * If saving position history is enabled,  
+ * save it at a specified time interval
+ */
 if (settings.putpositionhistory) {
     setInterval(putPositionHistory, settings.histintervalmsec);
 }
 
+/**
+ * If using Stratux as a gps position source, 
+ * get the data at a specified time interval
+ */
 if (settings.getgpsfromstratux) {
     setInterval(getGpsData, settings.gpsintervalmsec);
 }
 
-// animation stuff
+/**
+ * For weather animation, gets the time 3 hours ago
+ * @returns Date
+ */
 function threeHoursAgo() {
     return new Date(Math.round(Date.now() / 3600000) * 3600000 - 3600000 * 3);
 }
 
+/**
+ * For displaying the animation time clock
+ */
 function updateInfo() {
     const el = document.getElementById('info');
     el.innerHTML = getLocalTimeZone(startDate.toString());
 }
-  
+
+/**
+ * Update the time clock  
+ */
 function setTime() {
     startDate.setMinutes(startDate.getMinutes() + 15);
     if (startDate > Date.now()) {
@@ -795,27 +903,47 @@ function setTime() {
     updateInfo();
 }
 setTime();
-  
+
+/**
+ * Stop the weather radar animation
+ */
 const stopWeatherRadar = function () {
     if (animationId !== null) {
       window.clearInterval(animationId);
       animationId = null;
     }
 };
-  
+
+/**
+ * Start the weather radar animation
+ */
 const playWeatherRadar = function () {
     stop();
     animationId = window.setInterval(setTime, 1000 / frameRate);
 };
-  
+
+/**
+ * Animation start button element and event listener
+ */
 const startButton = document.getElementById('play');
 startButton.addEventListener('click', playWeatherRadar, false);
-  
+
+/**
+ * Animation stop button element and event listener
+ */
 const stopButton = document.getElementById('pause');
 stopButton.addEventListener('click', stopWeatherRadar, false);
 
+/**
+ * Sets an initial time in the timeclock element
+ */
 updateInfo();
 
+/**
+ * 
+ * @param {*} temp: Temperature in Centigrade 
+ * @returns Farenheit temperature fixed to 2 decimal places
+ */
 const convertCtoF = ((temp) => {
     let num = (temp * 9/5 + 32);
     return num.toFixed(1);
@@ -845,6 +973,10 @@ let alt = 0;
 let lng = 0;
 let lat = 0;
 
+/**
+ * Get gps data from Stratux, updates current position
+ * and orients the rotation of the ownship image
+ */
 function getGpsData() {
     $.get(settings.stratuxurl, function(data) {
         pos = ol.proj.fromLonLat([data.GPSLongitude, data.GPSLatitude]);
@@ -860,6 +992,9 @@ function getGpsData() {
     });
 }
 
+/**
+ * Save the position history in positionhistory.db
+ */
 function putPositionHistory() {
     if (last_longitude !== lng || last_latitude !== lat) {
         if (lng + lat + deg + alt > 0) {
@@ -870,7 +1005,6 @@ function putPositionHistory() {
 
             var xhr = new XMLHttpRequest();
             xhr.open("POST", URL_PUT_HISTORY);
-
             xhr.setRequestHeader("Content-Type", "application/json");
             try {    
                 xhr.send(JSON.stringify(postage));
@@ -880,10 +1014,23 @@ function putPositionHistory() {
     }
 }
 
+/**
+ * Utility function to replace all instances of a  
+ * specified string with another specified string
+ * @param {*} string: string to search 
+ * @param {*} search: string to search FOR 
+ * @param {*} replace: string to replace any found search 
+ * @returns sring: the new string with replacements
+ */
 function replaceAll(string, search, replace) {
     return string.split(search).join(replace);
 }
 
+/**
+ * Get the local machine dae/time from the supplied ZULU date
+ * @param {*} zuludate: the ZULU date to be translated 
+ * @returns string: the translated date in standard or daylight time
+ */
 function getLocalTimeZone(zuludate) {
     let date = new Date(zuludate);
     let time = date.toString();
@@ -939,6 +1086,12 @@ function getLocalTimeZone(zuludate) {
     return retval;
 }
 
+/**
+ * Utility function to trim and round Metar or TAF  
+ * altimeter value to a standard fixed(2) number
+ * @param {*} altimeter 
+ * @returns 
+ */
 function getAltimeterSetting(altimeter) {
     let dbl = parseFloat(altimeter);
     return dbl.toFixed(2).toString();
