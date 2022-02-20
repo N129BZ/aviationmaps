@@ -264,7 +264,7 @@ function loadAllAirportsArray(jsonobj) {
                 ident: airport.ident,
                 type: airport.type,
                 name: airport.name,
-                isoregion: isoregion,over
+                isoregion: isoregion,
                 geometry: new ol.geom.Point(ol.proj.fromLonLat([lon, lat])),
             });
             marker.setId(airport.ident);
