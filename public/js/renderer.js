@@ -67,12 +67,13 @@ let tiledebugLayer;
 let websock;
 let wsOpen = false;
 let MessageTypes = {};
-
+let DistanceUnits = {};
+let distanceunit = "";
 /**
  * Animation variables 
  */
 let animationId = null;
-let startDate = threeHoursAgo();
+let startDate = getTimeThreeHoursAgo();
 let frameRate = 1.0; // frames per second
 const animatecontrol = document.getElementById('wxbuttons');
 
@@ -222,6 +223,8 @@ $.get({
         try {
             settings = JSON.parse(data);
             MessageTypes = settings.messagetypes;
+            DistanceUnits = settings.distanceunits;
+            distanceunit = settings.distanceunit;
             currentZoom = settings.startupzoom;
         }
         catch(err) {
@@ -450,6 +453,21 @@ map.on('pointermove', (evt) => {
     map.forEachFeatureAtPixel(evt.pixel, (feature) => {
         if (feature) {
             hasfeature = true;
+        }
+    });
+    if (!hasfeature) {
+        popupcloser.onclick();
+    }
+});
+
+
+map.on('singleclick', (evt) => {
+    let hasfeature = false;
+    currentZoom = map.getView().getZoom();
+    resizeDots();
+    map.forEachFeatureAtPixel(evt.pixel, (feature) => {
+        if (feature) {
+            hasfeature = true;
             let datatype = feature.get("datatype");
             if (datatype === "metar") {
                 createMetarPopup(feature);
@@ -464,9 +482,6 @@ map.on('pointermove', (evt) => {
             popupoverlay.setPosition(coordinate);
         }
     });
-    if (!hasfeature) {
-        popupcloser.onclick();
-    }
 });
 
 function createMetarPopup(feature) {
@@ -476,7 +491,10 @@ function createMetarPopup(feature) {
     if (cat == undefined || cat == "undefined"){
         cat = "VFR";
     }
-    let time = getLocalTimeZone(thismetar.observation_time);
+    let time = thismetar.observation_time;
+    if (settings.uselocaltimeformetars) {
+        time = getLocalTimeZone(time);
+    }
     let temp = convertCtoF(thismetar.temp_c);
     let dewp = convertCtoF(thismetar.dewpoint_c);
     let windir = thismetar.wind_dir_degrees;
@@ -484,6 +502,15 @@ function createMetarPopup(feature) {
     let wingst = thismetar.wind_gust_kt + ""; 
     let altim = getAltimeterSetting(thismetar.altim_in_hg);
     let vis = thismetar.visibility_statute_mi;
+    let visunit = settings.visibilityunit;
+    switch (visunit) {
+        case "km":
+            vis = convertMilesToKilometers(vis);
+            break;
+        case "nm":
+            vis = convertMilesToNauticalMiles(vis);
+            break;
+    }
     let skyconditions = "";
     try {
         let sky = [];
@@ -531,14 +558,14 @@ function createMetarPopup(feature) {
         }
         let html = `<div id="#featurepopup"><pre><code><p>`
         html +=    `${css}&nbsp&nbsp${name}${ident} - ${cat}&nbsp&nbsp</label><p></p>`;
-        html +=   (time != "" && time != "undefined") ? `<b>Time:</b> ${time}<br/>` : "";
-        html +=   (temp != "" && temp != "undefined") ? `<b>Temp:</b> ${temp}<br/>` : "";
-        html +=   (dewp != "" && dewp != "undefined") ?`<b>Dewpoint:</b> ${dewp}<br/>` : "";
-        html += (windir != "" && windir != "undefined") ? `<b>Wind Dir:</b> ${windir}<br/>` : "";
-        html += (winspd != "" && winspd != "undefined") ? `<b>Wind Speed:</b> ${winspd} kt<br/>` : "";
-        html += (wingst != "" && wingst != "undefined") ? `<b>Wind Gust:</b> ${wingst} kt<br/>` : "";
-        html +=  (altim != "" && altim != "undefined") ? `<b>Altimeter:</b> ${altim} hg<br/>` : "";
-        html +=    (vis != "" && vis != "undefined") ? `<b>Visibility:</b> ${vis} statute miles<br/>` : "";
+        html +=   (time != "" && time != "undefined") ? `Time:&nbsp<b>${time}</b><br/>` : "";
+        html +=   (temp != "" && temp != "undefined") ? `Temp:&nbsp<b>${temp}</b><br/>` : "";
+        html +=   (dewp != "" && dewp != "undefined") ?`Dewpoint:&nbsp<b>${dewp}</b><br/>` : "";
+        html += (windir != "" && windir != "undefined") ? `Wind Dir:&nbsp<b>${windir}</b><br/>` : "";
+        html += (winspd != "" && winspd != "undefined") ? `Wind Speed:&nbsp<b>${winspd}&nbspkt</b><br/>` : "";
+        html += (wingst != "" && wingst != "undefined") ? `Wind Gust:&nbsp<b>${wingst}&nbspkt</b><br/>` : "";
+        html +=  (altim != "" && altim != "undefined") ? `Altimeter:&nbsp<b>${altim}&nbsphg</b><br/>` : "";
+        html +=    (vis != "" && vis != "undefined") ? `Visibility:&nbsp<b>${vis}</b><br/>` : "";
         html += (skyconditions != "" && skyconditions != "undefined") ? `${skyconditions}` : "";
         html += `</p></code></pre></div>`;
         popupcontent.innerHTML = html;  
@@ -553,7 +580,10 @@ function createTafPopup(feature) {
     if (cat == undefined || cat == "undefined"){
         cat = "VFR";
     }
-    let time = getLocalTimeZone(thistaf.observation_time);
+    let time = thistaf.observation_time;
+    if (settings.uselocaltimeformetars){
+        time = getLocalTimeZone(time);
+    }
     let temp = convertCtoF(thistaf.temp_c);
     let dewp = convertCtoF(thistaf.dewpoint_c);
     let windir = thistaf.wind_dir_degrees;
@@ -561,6 +591,15 @@ function createTafPopup(feature) {
     let wingst = thistaf.wind_gust_kt + ""; 
     let altim = getAltimeterSetting(thistaf.altim_in_hg);
     let vis = thistaf.visibility_statute_mi;
+    let visunit = settings.visibilityunit;
+    switch (visunit) {
+        case "km":
+            vis = convertMilesToKilometers(vis);
+            break;
+        case "nm":
+            vis = convertMilesToNauticalMiles(vis);
+            break;
+    }
     let skyconditions = "";
     try {
         let sky = [];
@@ -607,18 +646,18 @@ function createTafPopup(feature) {
             console.log("Airport name NOT FOUND!");
         }
         let html = `<div id="#featurepopup"><pre><code><p>`
-        html +=    `${css}&nbsp&nbsp${ident} - ${cat}&nbsp&nbsp</label><p></p>`;
-        html +=   (time != "" && time != "undefined") ? `<b>Time:</b> ${time}<br/>` : "";
-        html +=   (temp != "" && temp != "undefined") ? `<b>Temp:</b> ${temp}<br/>` : "";
-        html +=   (dewp != "" && dewp != "undefined") ?`<b>Dewpoint:</b> ${dewp}<br/>` : "";
-        html += (windir != "" && windir != "undefined") ? `<b>Wind Dir:</b> ${windir}<br/>` : "";
-        html += (winspd != "" && winspd != "undefined") ? `<b>Wind Speed:</b> ${winspd} kt<br/>` : "";
-        html += (wingst != "" && wingst != "undefined") ? `<b>Wind Gust:</b> ${wingst} kt<br/>` : "";
-        html +=  (altim != "" && altim != "undefined") ? `<b>Altimeter:</b> ${altim} hg<br/>` : "";
-        html +=    (vis != "" && vis != "undefined") ? `<b>Visibility:</b> ${vis} statute miles<br/>` : "";
+        html +=    `${css}&nbsp&nbsp${name}${ident} - ${cat}&nbsp&nbsp</label><p></p>`;
+        html +=   (time != "" && time != "undefined") ? `Time:&nbsp<b>${time}</b><br/>` : "";
+        html +=   (temp != "" && temp != "undefined") ? `Temp:&nbsp<b>${temp}</b><br/>` : "";
+        html +=   (dewp != "" && dewp != "undefined") ?`Dewpoint:&nbsp<b>${dewp}</b><br/>` : "";
+        html += (windir != "" && windir != "undefined") ? `Wind Dir:&nbsp<b>${windir}</b><br/>` : "";
+        html += (winspd != "" && winspd != "undefined") ? `Wind Speed:&nbsp<b>${winspd}&nbspkt</b><br/>` : "";
+        html += (wingst != "" && wingst != "undefined") ? `Wind Gust:&nbsp<b>${wingst}&nbspkt</b><br/>` : "";
+        html +=  (altim != "" && altim != "undefined") ? `Altimeter:&nbsp<b>${altim}&nbsphg</b><br/>` : "";
+        html +=    (vis != "" && vis != "undefined") ? `Visibility:&nbsp<b>${vis}</b><br/>` : "";
         html += (skyconditions != "" && skyconditions != "undefined") ? `${skyconditions}` : "";
         html += `</p></code></pre></div>`;
-        popupcontent.innerHTML = html;    
+        popupcontent.innerHTML = html;      
     }
 }
 
@@ -740,6 +779,7 @@ animatedWxSource = new ol.source.TileWMS({
     params: {'LAYERS': 'nexrad-n0r-wmst'},
 });
 
+
 /**
  * jQuery $get all layer tile data
  */
@@ -750,9 +790,11 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
         title: "VFR Sectional Chart",
         type: "overlay", 
         source: new ol.source.XYZ({
+            attributions: ["© <a href='https://www.openflightmaps.org'>openflightmaps.org</a>"],
             url: URL_GET_VFRSEC_TILE,
             maxZoom: 11,
-            minZoom: 5
+            minZoom: 5,
+            attributionsCollapsible: false
         }),
         visible: false,
         extent: extent,
@@ -953,7 +995,7 @@ if (settings.getgpsfromstratux) {
  * For weather animation, gets the time 3 hours ago
  * @returns Date
  */
-function threeHoursAgo() {
+function getTimeThreeHoursAgo() {
     return new Date(Math.round(Date.now() / 3600000) * 3600000 - 3600000 * 3);
 }
 
@@ -971,7 +1013,7 @@ function updateInfo() {
 function setTime() {
     startDate.setMinutes(startDate.getMinutes() + 15);
     if (startDate > Date.now()) {
-      startDate = threeHoursAgo();
+      startDate = getTimeThreeHoursAgo();
     }
     animatedWxSource.updateParams({'TIME': startDate.toISOString()});
     updateInfo();
@@ -1014,7 +1056,7 @@ stopButton.addEventListener('click', stopWeatherRadar, false);
 updateInfo();
 
 /**
- * 
+ * Convert Celsius to Farenheit
  * @param {*} temp: Temperature in Centigrade 
  * @returns Farenheit temperature fixed to 2 decimal places
  */
@@ -1022,6 +1064,27 @@ const convertCtoF = ((temp) => {
     let num = (temp * 9/5 + 32);
     return num.toFixed(1);
 });
+
+/**
+ * Convert statute miles to desired unit 
+ * @param {*} miles: statute miles
+ * @returns statute miles, kilometers or nautical miles   
+ */
+ function getDistanceUnits(miles) {
+    let num = miles;
+    let label = "mi";
+    switch (distanceunit) {
+        case DistanceUnits.kilometers: 
+            num = miles * 1.609344;
+            label = "km"
+            break;
+        case DistanceUnits.nauticalmiles:
+            num = miles * 0.8689762419;
+            label = "nm";
+            break;
+    }
+    return `${num.toFixed(1)} ${label}`;
+}
 
 /**
  * Builds a HTML Table out of a JSON obje

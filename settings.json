@@ -18,12 +18,19 @@
     "gcanyonGaDb": "Grand_Canyon_GA.mbtiles",
     "historyDb": "positionhistory.db",
     "airportsDb": "airports.db",
+    "uselocaltimeformetars": true,
+    "visibilityunit": "kilometers", 
     "stratuxurl": "http://192.168.10.1/getSituation",
     "animatedwxurl": "https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0r-t.cgi",
     "addswxurl": "https://aviationweather.gov/adds/dataserver_current/httpparam?dataSource=@SOURCE&requestType=retrieve&format=xml&hoursBeforeNow=1.5&mostRecentForEachStation=true&stationString=",
     "addsurrentxmlurl": "https://aviationweather.gov/adds/dataserver_current/current/@SOURCE.cache.xml",
     "lockownshiptocenter": true,
     "ownshipimage": "blueplane.png",
+    "distanceunits": {
+        "kilometers": "km",
+        "nauticalmiles": "nm",
+        "statutemiles": "sm"
+    },
     "messagetypes": {
         "metars": {
             "self": "metars",

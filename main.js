@@ -1,7 +1,7 @@
 const { app, BrowserWindow, ipcMain, Menu } = require('electron');
 const fs = require('fs');
 
-require('./appserver.js');
+require('./server.js');
 
 let appWindow = null;
 let settings = loadSettings();

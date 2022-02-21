@@ -70,7 +70,10 @@ function startWebsocketServer() {
                 console.log("connection closed");
             });
             connection.on('message', data => {
-                console.log(data);
+                let message = JSON.parse(data.utf8Data);
+                if (message.type === MessageTypes.keepalive.type) {
+                    console.log(message.payload);
+                }
             });
         });
     }
