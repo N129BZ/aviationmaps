@@ -138,9 +138,9 @@ function loadAirportsJson() {
     let msgtype = "";
     msgtype = MessageTypes.airports.type;
     sql = `SELECT ident, type, name, elevation_ft, longitude_deg, latitude_deg, iso_region ` + 
-            `FROM airports ` +
-            `WHERE iso_region LIKE 'US%' ` +
-            `ORDER BY iso_region ASC;`;
+          `FROM airports ` +
+          `WHERE type NOT IN ('closed') ` +
+          `ORDER BY iso_region ASC;`;
     let jsonout = {
         "airports": []
     };
