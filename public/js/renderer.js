@@ -32,33 +32,40 @@ let currentZoom = 10;
  * metars, tafs, airport info, etc.
  */
 let metarFeatures = new ol.Collection();
-let allapFeatures = new ol.Collection();
+let airportFeatures = new ol.Collection();
 let tafFeatures = new ol.Collection();
-
+let heliportFeatures = new ol.Collection();
 
 /**
- * ol.VectorSources
+ * Vector sources
  */
 let metarsVectorSource;
 let allAirportsVectorSource;
-let tafsLayerVectorSource;
-let animatedWxSource;
+let tafsVectorSource;
+let heliportsVectorSource;
+let animatedWxTileSource;
 
 /**
- * ol.Layer objects
+ * Tile layers
  */
-let allAirportsLayer;
-let tafsLayer;
-let metarsLayer;
-let vfrsecLayer;
-let termLayer;
-let heliLayer;
-let caribLayer;
-let gcaoLayer;
-let gcgaLayer;
-let osmLayer;
-let animatedWxLayer;
-let tiledebugLayer;  
+let osmTileLayer;
+let sectionalTileLayer;
+let terminalTileLayer;
+let helicopterTileLayer;
+let caribbeanTileLayer;
+let grandcanyonAoTileLayer;
+let grandcanyonGaTileLayer;
+let animatedWxTileLayer;
+let debugTileLayer;  
+
+/**
+ * Vector layers
+ */
+let airportsVectorLayer;
+let metarsVectorLayer;
+let tafsVectorLayer;
+let heliportsVectorLayer;
+
 
 /**
  * Websocket object, flag, and message definition
@@ -140,7 +147,15 @@ let circleMarker = new ol.style.Icon({
     opacity: 1,
     scale: .25
 });
-
+/*--------------------------------------*/
+let heliportMarker = new ol.style.Icon({
+    crossOrigin: 'anonymous',
+    src: `${URL_SERVER}/img/helipad.png`,
+    size: [45, 45],
+    offset: [0, 0],
+    opacity: 1,
+    scale: .25
+});
 
 /**
  * ol.Style objects 
@@ -163,6 +178,9 @@ const tafStyle = new ol.style.Style({
 const circleStyle = new ol.style.Style({
     image: circleMarker
 });
+const heliportStyle = new ol.style.Style({
+    image: heliportMarker
+});
 
 /**
  * JQuery method to immediately initialize the websocket connection
@@ -172,7 +190,7 @@ const circleStyle = new ol.style.Style({
         let wsurl = `ws://${window.location.hostname}:${settings.wsport}`;
         console.log(`OPENING: ${wsurl}`);
         websock = new WebSocket(wsurl);
-        websock.onmessage = function(evt) {
+        websock.onmessage = (evt) => {
             let message = JSON.parse(evt.data);
             let payload = JSON.parse(message.payload);
             switch (message.type) {
@@ -284,18 +302,32 @@ function loadAirportsCollection(jsonobj) {
             let lon = airport.lon;
             let lat = airport.lat;
             let isoregion = airport.isoregion.replace("US-", "");
-            
-            let allapmarker = new ol.Feature({
-                ident: airport.ident,
-                type: airport.type,
-                name: airport.name,
-                isoregion: isoregion,
-                geometry: new ol.geom.Point(ol.proj.fromLonLat([lon, lat]))
-            });
-            allapmarker.setId(airport.ident);
-            allapmarker.setStyle(circleStyle);
-            allapFeatures.push(allapmarker);
-            regionmap.set(isoregion, isoregion);   
+            regionmap.set(isoregion, isoregion);
+
+            if (airport.type !== "heliport") {
+                let airportmarker = new ol.Feature({
+                    ident: airport.ident,
+                    type: airport.type,
+                    name: airport.name,
+                    isoregion: isoregion,
+                    geometry: new ol.geom.Point(ol.proj.fromLonLat([lon, lat]))
+                });
+                airportmarker.setId(airport.ident);
+                airportmarker.setStyle(circleStyle);
+                airportFeatures.push(airportmarker);
+            }
+            else {
+                let heliportmarker = new ol.Feature({
+                    ident: airport.ident,
+                    type: airport.type,
+                    name: airport.name,
+                    isoregion: isoregion,
+                    geometry: new ol.geom.Point(ol.proj.fromLonLat([lon, lat]))
+                });
+                heliportmarker.setId(airport.ident);
+                heliportmarker.setStyle(heliportStyle);   
+                heliportFeatures.push(heliportmarker);
+            }  
         }
 
         /**
@@ -329,7 +361,7 @@ regionselect.addEventListener('change', (event) => {
  * @param {*} criteria: string
  */
 function selectStateFeatures(criteria = "allregions") {
-    allapFeatures.forEach((feature) => {
+    airportFeatures.forEach((feature) => {
         let type = feature.get("type");
         let isoregion = feature.get("isoregion");
         feature.setStyle(circleStyle);
@@ -501,16 +533,7 @@ function createMetarPopup(feature) {
     let winspd = thismetar.wind_speed_kt + "";
     let wingst = thismetar.wind_gust_kt + ""; 
     let altim = getAltimeterSetting(thismetar.altim_in_hg);
-    let vis = thismetar.visibility_statute_mi;
-    let visunit = settings.visibilityunit;
-    switch (visunit) {
-        case "km":
-            vis = convertMilesToKilometers(vis);
-            break;
-        case "nm":
-            vis = convertMilesToNauticalMiles(vis);
-            break;
-    }
+    let vis = getDistanceUnits(thismetar.visibility_statute_mi);
     let skyconditions = "";
     try {
         let sky = [];
@@ -525,7 +548,7 @@ function createMetarPopup(feature) {
         sky.forEach((level) => {
             let str = replaceAll(level[0], "_", " ");
             str = str.charAt(0).toUpperCase() + str.substring(1);
-            skyconditions += `<b>${str}:</b> ${level[1]}<br />`;
+            skyconditions += `${str}:&nbsp<b>${level[1]}</b><br/>`;
         });
     }
     catch(error){
@@ -590,16 +613,7 @@ function createTafPopup(feature) {
     let winspd = thistaf.wind_speed_kt + "";
     let wingst = thistaf.wind_gust_kt + ""; 
     let altim = getAltimeterSetting(thistaf.altim_in_hg);
-    let vis = thistaf.visibility_statute_mi;
-    let visunit = settings.visibilityunit;
-    switch (visunit) {
-        case "km":
-            vis = convertMilesToKilometers(vis);
-            break;
-        case "nm":
-            vis = convertMilesToNauticalMiles(vis);
-            break;
-    }
+    let vis = getDistanceUnits(thistaf.visibility_statute_mi);
     let skyconditions = "";
     try {
         let sky = [];
@@ -614,7 +628,7 @@ function createTafPopup(feature) {
         sky.forEach((level) => {
             let str = replaceAll(level[0], "_", " ");
             str = str.charAt(0).toUpperCase() + str.substring(1);
-            skyconditions += `<b>${str}:</b> ${level[1]}<br />`;
+            skyconditions += `${str}:&nbsp<b>${level[1]}</b><br/>`;
         });
     }
     catch(error){
@@ -657,7 +671,7 @@ function createTafPopup(feature) {
         html +=    (vis != "" && vis != "undefined") ? `Visibility:&nbsp<b>${vis}</b><br/>` : "";
         html += (skyconditions != "" && skyconditions != "undefined") ? `${skyconditions}` : "";
         html += `</p></code></pre></div>`;
-        popupcontent.innerHTML = html;      
+        popupcontent.innerHTML = html;    
     }
 }
 
@@ -773,7 +787,7 @@ function resizeDots() {
 /**
  * Tile source for animated weather
  */
-animatedWxSource = new ol.source.TileWMS({
+animatedWxTileSource = new ol.source.TileWMS({
     attributions: ['Iowa State University'],
     url: settings.animatedwxurl,
     params: {'LAYERS': 'nexrad-n0r-wmst'},
@@ -786,7 +800,7 @@ animatedWxSource = new ol.source.TileWMS({
 $.get(`${URL_GET_TILESETS}`, (data) => {
     let extent = ol.proj.transformExtent(viewextent, 'EPSG:4326', 'EPSG:3857')
     
-    vfrsecLayer = new ol.layer.Tile({
+    sectionalTileLayer = new ol.layer.Tile({
         title: "VFR Sectional Chart",
         type: "overlay", 
         source: new ol.source.XYZ({
@@ -801,7 +815,7 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
         zIndex: 10
     });
     
-    termLayer = new ol.layer.Tile({
+    terminalTileLayer = new ol.layer.Tile({
         title: "Terminal Area Charts",
         type: "overlay", 
         source: new ol.source.XYZ({
@@ -814,7 +828,7 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
         zIndex: 10
     });
     
-    heliLayer = new ol.layer.Tile({
+    helicopterTileLayer = new ol.layer.Tile({
         title: "Helicopter Charts",
         type: "overlay", 
         source: new ol.source.XYZ({
@@ -827,7 +841,7 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
         zIndex: 10
     });
 
-    caribLayer = new ol.layer.Tile({
+    caribbeanTileLayer = new ol.layer.Tile({
         title: "Caribbean Charts",
         type: "overlay", 
         source: new ol.source.XYZ({
@@ -840,7 +854,7 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
         zIndex: 10
     });
 
-    gcaoLayer = new ol.layer.Tile({
+    grandcanyonAoTileLayer = new ol.layer.Tile({
         title: "Grand Canyon Air Ops",
         type: "overlay", 
         source: new ol.source.XYZ({
@@ -853,7 +867,7 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
         zIndex: 10
     });
 
-    gcgaLayer = new ol.layer.Tile({
+    grandcanyonGaTileLayer = new ol.layer.Tile({
         title: "Grand Canyon GA",
         type: "overlay", 
         source: new ol.source.XYZ({
@@ -866,8 +880,25 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
         zIndex: 10
     });
 
+    debugTileLayer = new ol.layer.Tile({
+        title: "Debug",
+        type: "overlay",
+        source: new ol.source.TileDebug(),
+        visible: false,
+        extent: extent,
+        zIndex: 12
+    });
+
+    animatedWxTileLayer = new ol.layer.Tile({
+        title: "Animated Weather",
+        extent: extent,
+        source: animatedWxTileSource,
+        visible: false,
+        zIndex: 11
+    });
+
     if (settings.useOSMonlinemap) {
-        osmLayer = new ol.layer.Tile({
+        osmTileLayer = new ol.layer.Tile({
             title: "Open Street Maps",
             type: "overlay",
             source: new ol.source.OSM(),
@@ -877,19 +908,10 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
         });
     }
 
-    tiledebugLayer = new ol.layer.Tile({
-        title: "Debug",
-        type: "overlay",
-        source: new ol.source.TileDebug(),
-        visible: false,
-        extent: extent,
-        zIndex: 12
-    });
-
     metarsVectorSource = new ol.source.Vector({
         features: metarFeatures
     });
-    metarsLayer = new ol.layer.Vector({
+    metarsVectorLayer = new ol.layer.Vector({
         title: "Metars",
         source: metarsVectorSource,
         visible: false,
@@ -897,10 +919,21 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
         zIndex: 11
     }); 
 
-    allAirportsVectorSource = new ol.source.Vector({
-        features: allapFeatures
+    heliportsVectorSource = new ol.layer.Vector({
+        features: heliportFeatures
     });
-    allAirportsLayer = new ol.layer.Vector({
+    heliportsVectorLayer = new ol.layer.Vector({
+        title: "Heliports",
+        source: heliportsVectorSource,
+        visible: false,
+        extent: extent,
+        zIndex: 11
+    });
+
+    allAirportsVectorSource = new ol.source.Vector({
+        features: airportFeatures
+    });
+    airportsVectorLayer = new ol.layer.Vector({
         title: "All Airports",
         source: allAirportsVectorSource,
         visible: false,
@@ -908,39 +941,32 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
         zIndex: 11
     }); 
     
-    animatedWxLayer = new ol.layer.Tile({
-        title: "Animated Weather",
-        extent: extent,
-        source: animatedWxSource,
-        visible: false,
-        zIndex: 11
-    });
-
-    tafsLayerVectorSource = new ol.source.Vector({
+    tafsVectorSource = new ol.source.Vector({
         features: tafFeatures
     });
-    tafsLayer = new ol.layer.Vector({
+    tafsVectorLayer = new ol.layer.Vector({
         title: "Terminal Area Forecasts",
-        source: tafsLayerVectorSource,
+        source: tafsVectorSource,
         visible: false,
         extent: extent,
         zIndex: 10
     });
         
-    map.addLayer(tiledebugLayer);
-    map.addLayer(allAirportsLayer);
-    map.addLayer(metarsLayer); 
-    map.addLayer(tafsLayer);
-    map.addLayer(animatedWxLayer);
-    map.addLayer(caribLayer);
-    map.addLayer(gcaoLayer);
-    map.addLayer(gcgaLayer);
-    map.addLayer(heliLayer);
-    map.addLayer(termLayer);
-    map.addLayer(vfrsecLayer);
+    map.addLayer(debugTileLayer);
+    map.addLayer(airportsVectorLayer);
+    map.addLayer(metarsVectorLayer); 
+    map.addLayer(tafsVectorLayer);
+    map.addLayer(heliportsVectorLayer);
+    map.addLayer(animatedWxTileLayer);
+    map.addLayer(caribbeanTileLayer);
+    map.addLayer(grandcanyonAoTileLayer);
+    map.addLayer(grandcanyonGaTileLayer);
+    map.addLayer(helicopterTileLayer);
+    map.addLayer(terminalTileLayer);
+    map.addLayer(sectionalTileLayer);
 
     if (settings.useOSMonlinemap) {
-        map.addLayer(osmLayer);
+        map.addLayer(osmTileLayer);
     }
 
     let layerSwitcher = new ol.control.LayerSwitcher({
@@ -949,8 +975,8 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
     });
     map.addControl(layerSwitcher);
 
-    allAirportsLayer.on('change:visible', () => {
-        let visible = allAirportsLayer.get('visible');
+    airportsVectorLayer.on('change:visible', () => {
+        let visible = airportsVectorLayer.get('visible');
         regioncontrol.style.visibility = visible ? 'visible' : 'hidden';
         if (visible) {
             regionselect.options[0].selected = true;
@@ -959,8 +985,8 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
         }
     });
 
-    animatedWxLayer.on('change:visible', () => {
-        let visible = animatedWxLayer.get('visible');
+    animatedWxTileLayer.on('change:visible', () => {
+        let visible = animatedWxTileLayer.get('visible');
         animatecontrol.style.visibility = visible ? 'visible' : 'hidden';
         visible ? playWeatherRadar() : stopWeatherRadar()
     });
@@ -1015,7 +1041,7 @@ function setTime() {
     if (startDate > Date.now()) {
       startDate = getTimeThreeHoursAgo();
     }
-    animatedWxSource.updateParams({'TIME': startDate.toISOString()});
+    animatedWxTileSource.updateParams({'TIME': startDate.toISOString()});
     updateInfo();
 }
 setTime();
@@ -1056,16 +1082,6 @@ stopButton.addEventListener('click', stopWeatherRadar, false);
 updateInfo();
 
 /**
- * Convert Celsius to Farenheit
- * @param {*} temp: Temperature in Centigrade 
- * @returns Farenheit temperature fixed to 2 decimal places
- */
-const convertCtoF = ((temp) => {
-    let num = (temp * 9/5 + 32);
-    return num.toFixed(1);
-});
-
-/**
  * Convert statute miles to desired unit 
  * @param {*} miles: statute miles
  * @returns statute miles, kilometers or nautical miles   
@@ -1085,6 +1101,16 @@ const convertCtoF = ((temp) => {
     }
     return `${num.toFixed(1)} ${label}`;
 }
+
+/**
+ * 
+ * @param {*} temp: Temperature in Centigrade 
+ * @returns Farenheit temperature fixed to 2 decimal places
+ */
+const convertCtoF = ((temp) => {
+    let num = (temp * 9/5 + 32);
+    return num.toFixed(1);
+});
 
 /**
  * Builds a HTML Table out of a JSON obje
@@ -1157,6 +1183,7 @@ let lat = 0;
 
 /**
  * Get gps data from Stratux, updates current position
+ * @returns statute miles, kilometers or nautical miles   
  * and orients the rotation of the ownship image
  */
 function getGpsData() {
@@ -1278,5 +1305,3 @@ function getAltimeterSetting(altimeter) {
     let dbl = parseFloat(altimeter);
     return dbl.toFixed(2).toString();
 }
-
-
