@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Build-up of all of the application urls 
+ * Construct all of the application urls 
  */
 let URL_HOST_BASE           = window.location.hostname + (window.location.port ? ':' + window.location.port : '');
 let URL_HOST_PROTOCOL       = window.location.protocol + "//";
@@ -16,7 +16,6 @@ let URL_GET_GCGA_TILE       = `${URL_SERVER}/tiles/gcgatile/{z}/{x}/{-y}.png`;
 let URL_GET_HISTORY         = `${URL_SERVER}/gethistory`;
 let URL_GET_SETTINGS        = `${URL_SERVER}/getsettings`;
 let URL_PUT_HISTORY         = `${URL_SERVER}/puthistory`;
-//let URL_GET_AIRPORTS        = `${URL_SERVER}/getairports`;
 let URL_GET_AIRPORTS        = `${URL_SERVER}/getairports`;
 
 /**
@@ -55,7 +54,6 @@ let allAirportsVectorSource;
  */
 let tafLayer;
 let tafLayerVectorSource;
-/*---------------------------*/
 
 /**
  * OpenLayers Layer objects
@@ -67,8 +65,8 @@ let caribLayer;
 let gcaoLayer;
 let gcgaLayer;
 let osmLayer;
-let wxLayer;
-let wxSource;
+let animatedWxLayer;
+let animatedWxSource;
 let tiledebug;  
 
 /**
@@ -351,7 +349,7 @@ const kamessage = {
     payload: MessageTypes.keepalive.token
 }
 function keepAlive() { 
-    var timeout = 30000;  
+    var timeout = settings.keepaliveintervalmsec;  
     if (wsOpen) {  
         websock.send(JSON.stringify(kamessage));  
     }  
@@ -376,6 +374,10 @@ const metaroverlay = new ol.Overlay({
       duration: 500,
     },
 });
+/**
+ * Metar popup closer
+ * @returns false!!
+ */
 metarcloser.onclick = () => {
     metaroverlay.setPosition(undefined);
     metarcloser.blur();
@@ -417,12 +419,15 @@ $.get({
         console.error(xhr.status, thrownError);
     }
 });
-let pos = ol.proj.fromLonLat([last_longitude, last_latitude]);
+/**
+ * set the global view position from last saved history 
+ */
+let viewposition = ol.proj.fromLonLat([last_longitude, last_latitude]);
 
 /**
  * Viewport extent for setting up map view
  */
-let ext = [-180, -85, 180, 85];
+let viewextent = [-180, -85, 180, 85];
 let offset = [-18, -18];
 
 /**
@@ -441,7 +446,7 @@ const scaleLine = new ol.control.ScaleLine({
 const map = new ol.Map({
     target: 'map',
     view: new ol.View({
-        center: pos,        
+        center: viewposition,        
         zoom: settings.startupzoom,
         enableRotation: false
     }),
@@ -456,7 +461,7 @@ const myairplane = new ol.Overlay({
     element: airplaneElement
 });
 myairplane.setOffset(offset);
-myairplane.setPosition(pos);
+myairplane.setPosition(viewposition);
 map.addOverlay(myairplane);
 
 /**
@@ -631,7 +636,7 @@ function resizeDots() {
 /**
  * Tile source for animated weather
  */
-wxSource = new ol.source.TileWMS({
+animatedWxSource = new ol.source.TileWMS({
     attributions: ['Iowa State University'],
     url: settings.animatedwxurl,
     params: {'LAYERS': 'nexrad-n0r-wmst'},
@@ -641,7 +646,7 @@ wxSource = new ol.source.TileWMS({
  * jQuery $get all layer tile data
  */
 $.get(`${URL_GET_TILESETS}`, (data) => {
-    let extent = ol.proj.transformExtent(ext, 'EPSG:4326', 'EPSG:3857')
+    let extent = ol.proj.transformExtent(viewextent, 'EPSG:4326', 'EPSG:3857')
     
     vfrsecLayer = new ol.layer.Tile({
         title: "VFR Sectional Chart",
@@ -763,10 +768,10 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
         zIndex: 11
     }); 
     
-    wxLayer = new ol.layer.Tile({
+    animatedWxLayer = new ol.layer.Tile({
         title: "Animated Weather",
         extent: extent,
-        source: wxSource,
+        source: animatedWxSource,
         visible: false,
         zIndex: 11
     });
@@ -786,7 +791,7 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
     map.addLayer(allAirportsLayer);
     map.addLayer(airportLayer); 
     map.addLayer(tafLayer);
-    map.addLayer(wxLayer);
+    map.addLayer(animatedWxLayer);
     map.addLayer(caribLayer);
     map.addLayer(gcaoLayer);
     map.addLayer(gcgaLayer);
@@ -818,8 +823,8 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
         let visible = tafLayer.get('visible');
     });
 
-    wxLayer.on('change:visible', () => {
-        let visible = wxLayer.get('visible');
+    animatedWxLayer.on('change:visible', () => {
+        let visible = animatedWxLayer.get('visible');
         animatecontrol.style.visibility = visible ? 'visible' : 'hidden';
         visible ? playWeatherRadar() : stopWeatherRadar()
     });
@@ -874,7 +879,7 @@ function setTime() {
     if (startDate > Date.now()) {
       startDate = threeHoursAgo();
     }
-    wxSource.updateParams({'TIME': startDate.toISOString()});
+    animatedWxSource.updateParams({'TIME': startDate.toISOString()});
     updateInfo();
 }
 setTime();
@@ -954,10 +959,10 @@ let lat = 0;
  */
 function getGpsData() {
     $.get(settings.stratuxurl, function(data) {
-        pos = ol.proj.fromLonLat([data.GPSLongitude, data.GPSLatitude]);
+        viewposition = ol.proj.fromLonLat([data.GPSLongitude, data.GPSLatitude]);
         if (data.GPSLongitude !== 0 && data.GPSLatitude !== 0) {
             myairplane.setOffset(offset);
-            myairplane.setPosition(pos);
+            myairplane.setPosition(viewposition);
             lng = data.GPSLongitude;
             lat = data.GPSLatitude;
             alt = data.GPSAltitudeMSL;
