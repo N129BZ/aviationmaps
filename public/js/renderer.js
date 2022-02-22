@@ -17,6 +17,7 @@ let URL_GET_HISTORY         = `${URL_SERVER}/gethistory`;
 let URL_GET_SETTINGS        = `${URL_SERVER}/getsettings`;
 let URL_PUT_HISTORY         = `${URL_SERVER}/puthistory`;
 let URL_GET_AIRPORTS        = `${URL_SERVER}/getairports`;
+let URL_GET_HELIPORTS       = `${URL_SERVER}/getheliports`;
 
 /**
  * global properties
@@ -195,17 +196,20 @@ const heliportStyle = new ol.style.Style({
             let payload = JSON.parse(message.payload);
             switch (message.type) {
                 case MessageTypes.airports.type:
-                loadAirportsCollection(payload);
-                break;
-            case MessageTypes.metars.type:
-                processMetars(payload);
-                break;
-            case MessageTypes.tafs.type:
-                processTafs(payload);
-                break;
-            case MessageTypes.pireps.type:
-                console.log(message.payload);
-                break;
+                    loadAirportsCollection(payload);
+                    break;
+                // case MessageTypes.heliports.type:
+                //     loadHeliportsCollection(payload);
+                //     break;    
+                case MessageTypes.metars.type:
+                    processMetars(payload);
+                    break;
+                case MessageTypes.tafs.type:
+                    processTafs(payload);
+                    break;
+                case MessageTypes.pireps.type:
+                    //console.log(message.payload);
+                    break;
             }
         }
 
@@ -231,7 +235,7 @@ const heliportStyle = new ol.style.Style({
 });
 
 /** 
- * Request settings JSON object from server
+ * Request settings JSON object from serverself
  */
 $.get({
     async: false,
@@ -279,6 +283,18 @@ $.get({
     }
 });
 
+// /**
+//  * Async $get for list of heliports
+//  */
+//  $.get({
+//     async: true,
+//     type: "GET",
+//     url: URL_GET_HELIPORTS,
+//     error: function (request, status, err) {
+//         console.error(`ERROR GETTING HELIPORTS: ${err}`);
+//     }
+// });
+
 /**
  * Async $get for list of airports
  */
@@ -287,13 +303,13 @@ $.get({
     type: "GET",
     url: URL_GET_AIRPORTS,
     error: function (request, status, err) {
-        console.error(`ERROR GETTING ALL AIRPORTS: ${err}`);
+        console.error(`ERROR GETTING AIRPORTS: ${err}`);
     }
 });
 
 /**
- * Called by airport data received from WebSocket 
- * @param {\} jsonobj: JSON object 
+ * Load airports into their feature collection 
+ * @param {*} jsonobj: JSON object 
  */
 function loadAirportsCollection(jsonobj) {
     try {
@@ -303,35 +319,21 @@ function loadAirportsCollection(jsonobj) {
             let lat = airport.lat;
             let isoregion = airport.isoregion.replace("US-", "");
             regionmap.set(isoregion, isoregion);
-
-            if (airport.type !== "heliport") {
-                let airportmarker = new ol.Feature({
-                    ident: airport.ident,
-                    type: airport.type,
-                    name: airport.name,
-                    isoregion: isoregion,
-                    geometry: new ol.geom.Point(ol.proj.fromLonLat([lon, lat]))
-                });
-                airportmarker.setId(airport.ident);
-                airportmarker.setStyle(circleStyle);
-                airportFeatures.push(airportmarker);
-            }
-            else {
-                let heliportmarker = new ol.Feature({
-                    ident: airport.ident,
-                    type: airport.type,
-                    name: airport.name,
-                    isoregion: isoregion,
-                    geometry: new ol.geom.Point(ol.proj.fromLonLat([lon, lat]))
-                });
-                heliportmarker.setId(airport.ident);
-                heliportmarker.setStyle(heliportStyle);   
-                heliportFeatures.push(heliportmarker);
-            }  
+            let airportmarker = new ol.Feature({
+                ident: airport.ident,
+                type: airport.type,
+                name: airport.name,
+                isoregion: isoregion,
+                geometry: new ol.geom.Point(ol.proj.fromLonLat([lon, lat]))
+            });
+            airportmarker.setId(airport.ident);
+            airportmarker.setStyle(circleStyle);
+            airportFeatures.push(airportmarker);
         }
 
         /**
-         * Map sort all region airports in alpha order by state
+         * This is for the region select dropdown list
+         * Map sort all region airports in alpha order by state/country
          */
         regionmap[Symbol.iterator] = function* () {
             yield* [...this.entries()].sort((a, b) => a[1] - b[1]);
@@ -347,6 +349,33 @@ function loadAirportsCollection(jsonobj) {
         console.error(err);
     }
 }
+
+// /**
+//  * Load heliports into their feature collection
+//  * @param {*} jsonobj 
+//  */
+// function loadHeliportsCollection(jsonobj) {
+//     try {
+//         for (let i=0; i< jsonobj.airports.length; i++) {
+//             let airport = jsonobj.airports[i];
+//             let lon = airport.lon;
+//             let lat = airport.lat;
+//             let heliportmarker = new ol.Feature({
+//                 ident: airport.ident,
+//                 type: airport.type,
+//                 name: airport.name,
+//                 isoregion: isoregion,
+//                 geometry: new ol.geom.Point(ol.proj.fromLonLat([lon, lat]))
+//             });
+//             heliportmarker.setId(airport.ident);
+//             heliportmarker.setStyle(heliportStyle);
+//             heliportFeatures.push(heliportmarker);
+//         }
+//     }
+//     catch(err){
+//         console.error(err);
+//     }
+// }
 
 /**
  * Region dropdown select event
@@ -919,16 +948,16 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
         zIndex: 11
     }); 
 
-    heliportsVectorSource = new ol.layer.Vector({
-        features: heliportFeatures
-    });
-    heliportsVectorLayer = new ol.layer.Vector({
-        title: "Heliports",
-        source: heliportsVectorSource,
-        visible: false,
-        extent: extent,
-        zIndex: 11
-    });
+    // heliportsVectorSource = new ol.layer.Vector({
+    //      features: heliportFeatures
+    // });
+    // heliportsVectorLayer = new ol.layer.Vector({
+    //      title: "Heliports",
+    //      source: heliportsVectorSource,
+    //      visible: false,
+    //      extent: extent,
+    //      zIndex: 11
+    // });
 
     allAirportsVectorSource = new ol.source.Vector({
         features: airportFeatures
@@ -945,7 +974,7 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
         features: tafFeatures
     });
     tafsVectorLayer = new ol.layer.Vector({
-        title: "Terminal Area Forecasts",
+        title: "TAFs",
         source: tafsVectorSource,
         visible: false,
         extent: extent,
@@ -956,7 +985,7 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
     map.addLayer(airportsVectorLayer);
     map.addLayer(metarsVectorLayer); 
     map.addLayer(tafsVectorLayer);
-    map.addLayer(heliportsVectorLayer);
+    //map.addLayer(heliportsVectorLayer);
     map.addLayer(animatedWxTileLayer);
     map.addLayer(caribbeanTileLayer);
     map.addLayer(grandcanyonAoTileLayer);

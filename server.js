@@ -137,17 +137,29 @@ const histdb = new sqlite3.Database(DB_HISTORY, sqlite3.OPEN_READWRITE, (err) =>
     }
 });
 
-function loadAirportsJson() {
+function loadAirportsJson(loadingheliports = false) {
     let msgtype = "";
-    msgtype = MessageTypes.airports.type;
-    sql = `SELECT ident, type, name, elevation_ft, longitude_deg, latitude_deg, iso_region ` + 
-          `FROM airports ` +
-          `WHERE type NOT IN ('closed') ` +
-          `ORDER BY iso_region ASC;`;
+    
+    if (loadingheliports) {
+        msgtype = MessageTypes.heliports.type;
+        sql = `SELECT ident, type, name, elevation_ft, longitude_deg, latitude_deg, iso_region ` + 
+              `FROM airports ` +
+              `WHERE type = 'heliport' ` +
+              `ORDER BY iso_region ASC;`;
+    }
+    else {
+        msgtype = MessageTypes.airports.type;
+        
+        sql = `SELECT ident, type, name, elevation_ft, longitude_deg, latitude_deg, iso_region ` + 
+              `FROM airports ` +
+              `WHERE type NOT IN ('closed') ` +
+              `ORDER BY iso_region ASC;`;
+    }
+
     let jsonout = {
         "airports": []
     };
-    
+
     airpdb.all(sql, (err, rows) => {
         if (err == null) {
             rows.forEach(row => {
@@ -260,7 +272,15 @@ try {
 
     app.get("/getairports", (req, res) => {
         setTimeout(() => {
-            loadAirportsJson()
+            loadAirportsJson(false)
+        }, 200);
+        res.writeHead(200);
+        res.end();
+    });
+
+    app.get("/getheliports", (req, res) => {
+        setTimeout(() => {
+            loadAirportsJson(true)
         }, 200);
         res.writeHead(200);
         res.end();
@@ -449,7 +469,7 @@ async function runDownloads() {
 
 async function downloadXmlFile(xmlmessage) {
     let xhr = new XMLHttpRequest();  
-    let url = settings.addsurrentxmlurl.replace(xmlmessage.token, xmlmessage.self);
+    let url = settings.addsurrentxmlurl.replace(xmlmessage.token, xmlmessage.type);
     xhr.open('GET', url, true);
     xhr.setRequestHeader('Content-Type', 'text/csv');
     xhr.setRequestHeader("Access-Control-Allow-Origin", "*");
@@ -466,7 +486,7 @@ async function downloadXmlFile(xmlmessage) {
                 payload: payload
             };
             const json = JSON.stringify(message);
-            fs.writeFileSync(`${DB_PATH}/${xmlmessage.self}.json`, json);
+            //fs.writeFileSync(`${DB_PATH}/${xmlmessage.type}.json`, json);
             connection.send(json);
         }
     };
