@@ -37,11 +37,13 @@ let last_latitude = 0;
 let last_heading = 0;
 let currentZoom = 9;
 let lastcriteria = "allregions";
-let tafkeymap = new Map();
-let wxkeymap = new Map();
+let tafFieldKeymap = new Map();
+let metarFieldKeymap = new Map();
+let wxCodeKeymap = new Map();
 
-loadTafKeyMap();
-loadWxDescriptions();
+loadTafFieldKeymap();
+loadMetarFieldKeymap();
+loadWxCodeKeymap();
 
 /**
  * ol.Collections hold features like
@@ -57,7 +59,15 @@ let tafFeatures = new ol.Collection();
 let metarVectorSource;
 let airportVectorSource;
 let tafVectorSource;
+let ownshipVectorSource;
 let animatedWxTileSource;
+
+/**
+ * Vector layers
+ */
+let airportVectorLayer;
+let metarVectorLayer;
+let tafVectorLayer;
 
 /**
  * Tile layers
@@ -71,13 +81,6 @@ let grandcanyonAoTileLayer;
 let grandcanyonGaTileLayer;
 let animatedWxTileLayer;
 let debugTileLayer;  
-
-/**
- * Vector layers
- */
-let airportVectorLayer;
-let metarVectorLayer;
-let tafVectorLayer;
 
 /**
  * Websocket object, flag, and message definition
@@ -491,10 +494,18 @@ map.addOverlay(myairplane);
 map.on('pointermove', (evt) => {
     //let hasfeature = false;
     let someZoom = map.getView().getZoom();
+    let inAnimation = false;
     if (currentZoom !== someZoom) {
         currentZoom = someZoom;
+        if (animationId !== null) {
+            inAnimation = true;
+            stopWeatherRadar();
+        }
         resizeDots();
         popupcloser.onclick();
+        if (inAnimation) {
+            playWeatherRadar();
+        }
     }
 });
 
@@ -542,6 +553,8 @@ function createMetarPopup(feature) {
     if (settings.uselocaltimeformetars) {
         time = getLocalTimeZone(time);
     }
+    let tempC = thismetar.temp_c;
+    let dewpC = thismetar.dewpoint_c;
     let temp = convertCtoF(thismetar.temp_c);
     let dewp = convertCtoF(thismetar.dewpoint_c);
     let windir = thismetar.wind_dir_degrees;
@@ -549,27 +562,10 @@ function createMetarPopup(feature) {
     let wingst = thismetar.wind_gust_kt + ""; 
     let altim = getAltimeterSetting(thismetar.altim_in_hg);
     let vis = getDistanceUnits(thismetar.visibility_statute_mi);
-    let skyconditions = "";
-    try {
-        let sky = [];
-        if (thismetar.sky_condition !== undefined) {    
-            thismetar.sky_condition.forEach((condition) => {
-                let map = Object.entries(condition);
-                map.forEach((item) => {
-                    sky.push(item);  
-                });
-            });
-        }
-        sky.forEach((level) => {
-            let str = replaceAll(level[0], "_", " ");
-            str = str.charAt(0).toUpperCase() + str.substring(1);
-            skyconditions += `${str}:&nbsp<b>${level[1]}</b><br/>`;
-        });
-    }
-    catch(error){
-        console.log(error.message);
-    }
-    
+    let wxcode = thismetar.wx_string !== undefined ? decodeWxDescriptions(thismetar.wx_string) : "";
+    let skyconditions = decodeSkyCondition(thismetar.sky_condition);
+    let icingconditions = decodeIcingCondition(thismetar.icing_condition);
+
     let label = `<label class="#class">`;
     let css;
     switch(cat) {
@@ -597,17 +593,19 @@ function createMetarPopup(feature) {
         let html = `<div id="#featurepopup"><pre><code><p>`
         html +=    `${css}&nbsp&nbsp${name}${ident} - ${cat}&nbsp&nbsp</label><p></p>`;
         html +=   (time != "" && time != "undefined") ? `Time:&nbsp<b>${time}</b><br/>` : "";
-        html +=   (temp != "" && temp != "undefined") ? `Temp:&nbsp<b>${temp}</b><br/>` : "";
-        html +=   (dewp != "" && dewp != "undefined") ?`Dewpoint:&nbsp<b>${dewp}</b><br/>` : "";
-        html += (windir != "" && windir != "undefined") ? `Wind Dir:&nbsp<b>${windir}</b><br/>` : "";
+        html +=   (temp != "" && temp != "undefined") ? `Temp:&nbsp<b>${tempC} °C</b> (${temp})<br/>` : "";
+        html +=   (dewp != "" && dewp != "undefined") ?`Dewpoint:&nbsp<b>${dewpC} °C</b> (${dewp})<br/>` : "";
+        html += (windir != "" && windir != "undefined") ? `Wind Dir:&nbsp<b>${windir}°</b><br/>` : "";
         html += (winspd != "" && winspd != "undefined") ? `Wind Speed:&nbsp<b>${winspd}&nbspkt</b><br/>` : "";
         html += (wingst != "" && wingst != "undefined") ? `Wind Gust:&nbsp<b>${wingst}&nbspkt</b><br/>` : "";
         html +=  (altim != "" && altim != "undefined") ? `Altimeter:&nbsp<b>${altim}&nbsphg</b><br/>` : "";
         html +=    (vis != "" && vis != "undefined") ? `Visibility:&nbsp<b>${vis}</b><br/>` : "";
+        html += (wxcode != "" && wxcode != "undefined") ? `Weather:&nbsp<b>${wxcode}</b><br/>`: "";
         html += (skyconditions != "" && skyconditions != "undefined") ? `${skyconditions}` : "";
-        html += `</p></code></pre></div>`;
+        html += `</p></code></pre><br /></div>`;
+        popupcloser.style.left = "30px";
+        popupcloser.style.top = "88%";
         popupcontent.innerHTML = html;  
-        
     }
 }
 
@@ -618,30 +616,35 @@ function createMetarPopup(feature) {
 function createTafPopup(feature) {
     let thistaf = feature.get("taf");
     let forecast = thistaf.forecast;
+    let outerhtml = `<div class="taftitle">` + 
+                        `<label class="taftitlelabel">Terminal Area Forecast - ${feature.get("ident")}</label>` +
+                    `</div>` +
+                    `<div class="taf">` + 
+                        `<pre><code>` +
+                        `<table class="tafmessage" id="taftable">` +
+                            `<tr class="tafbody">` + 
+                                `<td id="tafdata">###</td>` +
+                            `</tr>` +
+                        `</table>` +
+                        `</code></pre>` +                 
+                    `</div>` + 
+                    `<br /><br />`;
 
-    console.log("CURRENT ZOOM: " + currentZoom);
-
-    let outerhtml = `<div class="taf">` +
-                    `<table class="tafmessage" id="taftable">` +
-                    `<thead>` +
-                    `<th class="tafheader">Terminal Area Forecast - ${feature.get("ident")}</th>` +
-                    `</thead>` + 
-                    `<tr class="tafbody">` + 
-                    `<td id="tafdata">###</td>` +
-                    `</tr>` +
-                    `</table>` + 
-                    `</div>`;
     let html = "<div>";
 
     Object.values(forecast).forEach((value) => {
         html += "<p>";
+        let fromto = `<label class="tafsubheader">`;
         Object.keys(value).forEach((key) => {
             let subobj = value[key];
-            let cleankey = replaceAll(key, "_", " ")
+            let fieldname = tafFieldKeymap.get(key);
             switch (key) {
                 case "fcst_time_from":
+                    fromto += `<b>${subobj}</b>`;
+                    break;
                 case "fcst_time_to":
-                    html += `<label class="tafsubheader">${cleankey}: <b>${subobj}</b></label><br />`;
+                    fromto += `&nbsp&nbspto&nbsp&nbsp<b>${subobj}</b></label><br />`
+                    html += `<label class="fcstlabel">${fromto}</label><br />`;
                     break;
                 case "change_indicator":
                 case "time_becoming":
@@ -657,59 +660,90 @@ function createTafPopup(feature) {
                 case "wx_string":
                     if (key === "wx_string") {
                         let lineval = decodeWxDescriptions(subobj);
-                        html += `<label class="tafwxlabel">${tafkeymap.get(key)}: <b>${lineval}</b></label><br />`;
+                        html += `<label class="tafwxlabel">${fieldname}: <b>${lineval}</b></label><br />`;
                     }
                     else {
-                        html += `<label class="taflabel">${tafkeymap.get(key)}: <b>${subobj}</b></label><br />`;
+                        html += `<label class="taflabel">${fieldname}: <b>${subobj}</b></label><br />`;
                     }
                     break;
                 case "sky_condition":
-                    html += `<label class="tafsubheader">${cleankey}</label><br />`;
-                    let ovals = Object.values(subobj);
-                    let okeys = Object.keys(subobj);
-                    let keycount = -1;
-                    Object.values(subobj).forEach((condition) => {
-                        let cleankey = "";
-                        let sublabel = "";
-                        if (typeof(condition) !== "string") {
-                            Object.keys(condition).forEach((conditionkey) => {
-                                cleankey = replaceAll(conditionkey, "_", " ");
-                                sublabel = `<label class="taflabel">${cleankey}: <b>${condition[conditionkey]}</b></label><br />`;
-                                html += sublabel;
-                            });
-                        }
-                        else {
-                            keycount ++;
-                            cleankey = replaceAll(okeys[keycount], "_", " ");
-                            sublabel = `<label class="taflabel">${cleankey}: <b>${ovals[keycount]}</b></label><br />`;
-                            console.log(sublabel);
-                            html += sublabel;
-                        }
-                    });        
+                    html += `<label class="tafskyheader">${fieldname}</label><br />`;
+                    html += decodeSkyCondition(subobj);
                     break;
                 case "turbulence_condition":
                 case "icing_condition":
-                    html += `<label class="tafsubheader">${cleankey}</label><br />`;
-                    Object.values(subobj).forEach((condition) => {
-                        Object.keys(subobj).forEach((condkey) => {
-                            let sublabel = `<label class="taflabel">${condkey}: <b>${condition}</b></label><br />`;
-                            console.log(sublabel);
-                            html += sublabel;
-                        });
-                    });        
+                    html += `<label class="tafskyheader">${fieldname}</label><br />`;
+                    html += decodeIcingCondition(subobj);
                     break;
                 case "temperature":
                     break;
 
             }
         });
-        html += "</p>";
+        html += "</p><hr>";
     });
     html += "</div>";
     html = outerhtml.replace("###", html);
+    popupcloser.style.left = "30px";
+    popupcloser.style.top = "94%";
     popupcontent.innerHTML = html;
 }
 
+function decodeSkyCondition(skyjson) {
+    let html = "";
+    if (skyjson !== undefined) {
+        let ovals = Object.values(skyjson);
+        let okeys = Object.keys(skyjson);
+        let keycount = -1;
+        try {
+            Object.values(skyjson).forEach((condition) => {
+                let cleankey = "";
+                let sublabel = "";
+                if (typeof(condition) !== "string") {
+                    Object.keys(condition).forEach((conditionkey) => {
+                        cleankey = metarFieldKeymap.get(conditionkey);
+                        if (cleankey === undefined || cleankey === "") {
+                            cleankey = replaceAll(conditionkey, "_", " ");
+                        }
+                        sublabel = `<label class="taflabel">${cleankey}: <b>${condition[conditionkey]}</b></label><br />`;
+                        html += sublabel;
+                    });
+                }
+                else {
+                    keycount ++;
+                    cleankey = metarFieldKeymap.get(okeys[keycount]);
+                    if (cleankey === undefined || cleankey === "") {
+                        cleankey = replaceAll(okeys[keycount], "_", " ");
+                    }
+                    sublabel = `<label class="taflabel">${cleankey}: <b>${ovals[keycount]}</b></label><br />`;
+                    html += sublabel;
+                }
+            });
+        }
+        catch (error) {
+            console.log(error.message);
+        }
+    }
+    return html;
+}
+
+function decodeIcingCondition(icingjson) {
+    let html = "";
+    if (icingjson != undefined) {
+        try {
+            Object.values(icingjson).forEach((condition) => {
+                Object.keys(icingjson).forEach((condkey) => {
+                    let sublabel = `<label class="taflabel">${replaceAll(condkey, "_", " ")}: <b>${condition}</b></label><br />`;
+                    html += sublabel;
+                });
+            });
+        }
+        catch (error) {
+            console.log(error.message);
+        }
+    }
+    return html;        
+}
 /**
  * Build the html for an airport feature
  * @param {*} feature: the airport the user clicked on 
@@ -1137,8 +1171,10 @@ updateInfo();
  * @returns Farenheit temperature fixed to 2 decimal places
  */
 const convertCtoF = ((temp) => {
+    if (temp == undefined) return "";
     let num = (temp * 9/5 + 32);
-    return num.toFixed(1);
+    if (num === NaN || num === undefined) return "";
+    else return `${num.toFixed(1)} F°`;
 });
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1291,86 +1327,141 @@ function getAltimeterSetting(altimeter) {
 }
 
 /**
- * Load the tafkeymap Map object with fixed field names
+ * Load taf normalized field names
  */
-function loadTafKeyMap() {
-    tafkeymap.set("fcst_time_from", "time from");
-    tafkeymap.set("fcst_time_to", "time to");
-    tafkeymap.set("change_indicator", "change indicator");
-    tafkeymap.set("time_becoming", "time becoming");
-    tafkeymap.set("probability", "probability");
-    tafkeymap.set("wind_dir_degrees", "direction °");
-    tafkeymap.set("wind_speed_kt", "speed kt");
-    tafkeymap.set("wind_gust_kt", "gust kt");
-    tafkeymap.set("wind_shear_hgt_ft_agl", "shear height ft agl");
-    tafkeymap.set("wind_shear_dir_degrees", "shear direction °");
-    tafkeymap.set("wind_shear_speed_kt", "shear speed kt");
-    tafkeymap.set("altim_in_hg", "altimeter (hg)");
-    tafkeymap.set("vert_vis_ft", "vert visibility ft");
-    tafkeymap.set("wx_string", "weather");
+function loadTafFieldKeymap() {
+    tafFieldKeymap.set("fcst_time_from", "Time from");
+    tafFieldKeymap.set("fcst_time_to", "Time to");
+    tafFieldKeymap.set("change_indicator", "Change indicator");
+    tafFieldKeymap.set("time_becoming", "Time becoming");
+    tafFieldKeymap.set("probability", "Probability");
+    tafFieldKeymap.set("wind_dir_degrees", "Wind Direction °");
+    tafFieldKeymap.set("wind_speed_kt", "Wind Speed kt");
+    tafFieldKeymap.set("wind_gust_kt", "Wind Gust kt");
+    tafFieldKeymap.set("wind_shear_hgt_ft_agl", "Shear height ft agl");
+    tafFieldKeymap.set("wind_shear_dir_degrees", "Shear direction °");
+    tafFieldKeymap.set("wind_shear_speed_kt", "Shear speed kt");
+    tafFieldKeymap.set("altim_in_hg", "Altimeter (Hg)");
+    tafFieldKeymap.set("vert_vis_ft", "Vertical vis. ft");
+    tafFieldKeymap.set("wx_string", "Weather");
+    tafFieldKeymap.set("sky_condition", "Sky condition");
+    tafFieldKeymap.set("icing_condition", "Icing condition");
+    tafFieldKeymap.set("turbulence_condition", "Turbulence condition");
+    tafFieldKeymap.set("sky_cover", "Sky cover");
+    tafFieldKeymap.set("cloud_base_ft_agl", "Cloud base ft AGL");
+    tafFieldKeymap.set("cloud_base", "Cloud base");
+}
+
+/**
+ * Load metar normalized field names
+ */
+ function loadMetarFieldKeymap() {
+    metarFieldKeymap.set("raw_text", "raw text");
+    metarFieldKeymap.set("station_id", "station id"); 
+    metarFieldKeymap.set("observation_time", "Observation Time");
+    metarFieldKeymap.set("latitude", "latitude");
+    metarFieldKeymap.set("longitude", "longitude");
+    metarFieldKeymap.set("temp_c", "Temp °C");
+    metarFieldKeymap.set("dewpoint_c", "Dewpoint °C");
+    metarFieldKeymap.set("wind_dir_degrees", "Wind dir °"); 
+    metarFieldKeymap.set("wind_speed_kt", "Wind speed kt");
+    metarFieldKeymap.set("wind_gust_kt", "Wind gust kt");
+    metarFieldKeymap.set("visibility_statute_mi", "Horiz. vis. statute mi.");
+    metarFieldKeymap.set("altim_in_hg", "Altimeter Hg");
+    metarFieldKeymap.set("sea_level_pressure_mb", "Sea-level press. Mb");
+    metarFieldKeymap.set("quality_control_flags", "Quality control flags");
+    metarFieldKeymap.set("wx_string", "Weather");
+    metarFieldKeymap.set("sky_condition", "Sky cover");
+    metarFieldKeymap.set("sky_cover", "Sky cover");
+    metarFieldKeymap.set("cloud_base_ft_agl", "Cloud base ft AGL");
+    metarFieldKeymap.set("cloud_base", "Cloud base");
+    metarFieldKeymap.set("flight_category", "Flight category");
+    metarFieldKeymap.set("three_hr_pressure_tendency_mb", "Press. change past 3 hrs.");
+    metarFieldKeymap.set("maxT_c", "Max air temp °C, past 6 hrs");
+    metarFieldKeymap.set("minT_c", "Min air temp °C, past 6 hrs");
+    metarFieldKeymap.set("maxT24hr_c", "Max air temp °C, past 24 hrs");
+    metarFieldKeymap.set("minT24hr_c", "Min air temp °C, past 24 hrs");
+    metarFieldKeymap.set("precip_in", "Liquid precip since last METAR");
+    metarFieldKeymap.set("pcp3hr_in", "Liquid precip past 3 hrs");
+    metarFieldKeymap.set("pcp6hr_in", "Liquid precip past 6 hrs");
+    metarFieldKeymap.set("pcp24hr_in", "Liquid precip past 24 hrs");
+    metarFieldKeymap.set("snow_in", "Snow (inches)");
+    metarFieldKeymap.set("vert_vis_ft", "Vertical vis. (feet)");
+    metarFieldKeymap.set("metar_type", "Metar type");
+    metarFieldKeymap.set("elevation_m", "Station elev. (meters)");
 }
 
 /**
  * Load the wxkeymap Map object with weather code descriptions
  */
-function loadWxDescriptions() {
-    wxkeymap.set("FU VA", "Smoke or volcanic Ash");
-    wxkeymap.set("HZ", "Haze");
-    wxkeymap.set("DU SA", "Dust or sand");
-    wxkeymap.set("BLDU BLSA", "Blowing dust or sand");
-    wxkeymap.set("PO", "Dust devil");
-    wxkeymap.set("VCSS", "Vicinity sand storm");
-    wxkeymap.set("BR", "Mist or light fog");
-    wxkeymap.set("MIFG", "More or less continuous shallow fog");
-    wxkeymap.set("VCTS", "Vicinity thunderstorm");
-    wxkeymap.set("VIRGA", "Virga or precipitation not hitting ground");
-    wxkeymap.set("VCSH", "Vicinity showers");
-    wxkeymap.set("TS", "Thunderstorm with or without precipitation");
-    wxkeymap.set("SQ", "Squalls");
-    wxkeymap.set("FC", "Funnel cloud or tornado");
-    wxkeymap.set("SS", "Sand or dust storm");
-    wxkeymap.set("+SS", "Strong sand or dust storm");
-    wxkeymap.set("BLSN", "Blowing snow");
-    wxkeymap.set("DRSN", "Drifting snow");
-    wxkeymap.set("VCFG", "Vicinity fog");
-    wxkeymap.set("BCFG", "Patchy fog");
-    wxkeymap.set("PRFG", "Fog, sky discernable");
-    wxkeymap.set("FG", "Fog, sky undiscernable");
-    wxkeymap.set("FZFG", "Freezing fog");
-    wxkeymap.set("-DZ", "Light drizzle");
-    wxkeymap.set("DZ", "Moderate drizzle");
-    wxkeymap.set("+DZ", "Heavy drizzle");
-    wxkeymap.set("-FZDZ", "Light freezing drizzle");
-    wxkeymap.set("FZDZ +FZDZ", "Moderate to heavy freezing drizzle");
-    wxkeymap.set("-DZRA", "Light drizzle and rain");
-    wxkeymap.set("DZRA", "Moderate to heavy drizzle and rain");
-    wxkeymap.set("-RA", "Light rain");
-    wxkeymap.set("RA", "Moderate rain");
-    wxkeymap.set("+RA", "Heavy rain");
-    wxkeymap.set("-FZRA", "Light freezing rain");
-    wxkeymap.set("FZRA +FZRA", "Moderate to heavy freezing rain");
-    wxkeymap.set("-RASN", "Light rain and snow");
-    wxkeymap.set("RASN +RASN", "Moderate to heavy rain and snow");
-    wxkeymap.set("-SN", "Light snow");
-    wxkeymap.set("SN", "Moderate snow");
-    wxkeymap.set("+SN", "Heavy snow");
-    wxkeymap.set("SG", "Snow grains");
-    wxkeymap.set("IC", "Ice crystals");
-    wxkeymap.set("PE PL", "Ice pellets");
-    wxkeymap.set("PE", "Ice pellets");
-    wxkeymap.set("PL", "Ice pellets");
-    wxkeymap.set("Showery precipitation");
-    wxkeymap.set("-SHRA", "Light rain showers");
-    wxkeymap.set("SHRA +SHRA", "Moderate to heavy rain showers");
-    wxkeymap.set("-SHRASN", "Light rain and snow showers");
-    wxkeymap.set("SHRASN +SHRASN", "Moderate to heavy rain and snow showers");
-    wxkeymap.set("-SHSN", "Light snow showers");
-    wxkeymap.set("SHSN +SHSN", "Moderate to heavy snow showers");
-    wxkeymap.set("-GR", "Light showers with hail, not with thunder");
-    wxkeymap.set("GR", "Moderate to heavy showers with hail, not with thunder");
-    wxkeymap.set("TSRA", "Light to moderate thunderstorm with rain");
-    wxkeymap.set("TSGR", "Light to moderate thunderstorm with hail");
-    wxkeymap.set("+TSRA", "Thunderstorm with heavy rain");
+function loadWxCodeKeymap() {
+    wxCodeKeymap.set("FU", "Smoke");
+    wxCodeKeymap.set("VA", "Volcanic Ash");
+    wxCodeKeymap.set("HZ", "Haze");
+    wxCodeKeymap.set("DU", "Dust");
+    wxCodeKeymap.set("SA", "Sand");
+    wxCodeKeymap.set("BLDU", "Blowing dust");
+    wxCodeKeymap.set("BLSA", "Blowing sand");
+    wxCodeKeymap.set("PO", "Dust devil");
+    wxCodeKeymap.set("VCSS", "Vicinity sand storm");
+    wxCodeKeymap.set("BR", "Mist or light fog");
+    wxCodeKeymap.set("MIFG", "More or less continuous shallow fog");
+    wxCodeKeymap.set("VCTS", "Vicinity thunderstorm");
+    wxCodeKeymap.set("VIRGA", "Virga or precipitation not hitting ground");
+    wxCodeKeymap.set("VCSH", "Vicinity showers");
+    wxCodeKeymap.set("TS", "Thunderstorm with or without precipitation");
+    wxCodeKeymap.set("SQ", "Squalls");
+    wxCodeKeymap.set("FC", "Funnel cloud or tornado");
+    wxCodeKeymap.set("SS", "Sand or dust storm");
+    wxCodeKeymap.set("+SS", "Strong sand or dust storm");
+    wxCodeKeymap.set("BLSN", "Blowing snow");
+    wxCodeKeymap.set("DRSN", "Drifting snow");
+    wxCodeKeymap.set("VCFG", "Vicinity fog");
+    wxCodeKeymap.set("BCFG", "Patchy fog");
+    wxCodeKeymap.set("PRFG", "Fog, sky discernable");
+    wxCodeKeymap.set("FG", "Fog, sky undiscernable");
+    wxCodeKeymap.set("FZFG", "Freezing fog");
+    wxCodeKeymap.set("-DZ", "Light drizzle");
+    wxCodeKeymap.set("DZ", "Moderate drizzle");
+    wxCodeKeymap.set("+DZ", "Heavy drizzle");
+    wxCodeKeymap.set("-FZDZ", "Light freezing drizzle");
+    wxCodeKeymap.set("FZDZ", "Moderate freezing drizzle");
+    wxCodeKeymap.set("+FZDZ", "Heavy freezing drizzle");
+    wxCodeKeymap.set("-DZRA", "Light drizzle and rain");
+    wxCodeKeymap.set("DZRA", "Moderate to heavy drizzle and rain");
+    wxCodeKeymap.set("-RA", "Light rain");
+    wxCodeKeymap.set("RA", "Moderate rain");
+    wxCodeKeymap.set("+RA", "Heavy rain");
+    wxCodeKeymap.set("-FZRA", "Light freezing rain");
+    wxCodeKeymap.set("FZRA", "Moderate freezing rain");
+    wxCodeKeymap.set("+FZRA", "Heavy freezing rain");
+    wxCodeKeymap.set("-RASN", "Light rain and snow");
+    wxCodeKeymap.set("RASN", "Moderate rain and snow");
+    wxCodeKeymap.set("+RASN", "Heavy rain and snow");
+    wxCodeKeymap.set("-SN", "Light snow");
+    wxCodeKeymap.set("SN", "Moderate snow");
+    wxCodeKeymap.set("+SN", "Heavy snow");
+    wxCodeKeymap.set("SG", "Snow grains");
+    wxCodeKeymap.set("IC", "Ice crystals");
+    wxCodeKeymap.set("PE PL", "Ice pellets");
+    wxCodeKeymap.set("PE", "Ice pellets");
+    wxCodeKeymap.set("PL", "Ice pellets");
+    wxCodeKeymap.set("-SHRA", "Light rain showers");
+    wxCodeKeymap.set("SHRA", "Moderate rain showers");
+    wxCodeKeymap.set("+SHRA", "Heavy rain showers");
+    wxCodeKeymap.set("-SHRASN", "Light rain and snow showers");
+    wxCodeKeymap.set("SHRASN", "Moderate rain and snow showers");
+    wxCodeKeymap.set("+SHRASN", "Heavy rain and snow showers");
+    wxCodeKeymap.set("-SHSN", "Light snow showers");
+    wxCodeKeymap.set("SHSN", "Moderate snow showers");
+    wxCodeKeymap.set("+SHSN", "Heavy snow showers");
+    wxCodeKeymap.set("-GR", "Light showers with hail, not with thunder");
+    wxCodeKeymap.set("GR", "Moderate to heavy showers with hail, not with thunder");
+    wxCodeKeymap.set("TSRA", "Light to moderate thunderstorm with rain");
+    wxCodeKeymap.set("TSGR", "Light to moderate thunderstorm with hail");
+    wxCodeKeymap.set("+TSRA", "Thunderstorm with heavy rain");
+    wxCodeKeymap.set("UP", "Unknown precipitation");
+    wxCodeKeymap.set("NSW", "No significant weather");
 }
 
 /**
@@ -1378,16 +1469,16 @@ function loadWxDescriptions() {
  * @param {*} codevalue: this could contain multiple space-delimited codes
  * @returns string with any weather description(s)
  */
-function decodeWxDescriptions(codevalue) {
+ function decodeWxDescriptions(codevalue) {
     let outstr = "";
     let vals = codevalue.split(" ");
     
     for (let i = 0; i < vals.length; i++) {
         if (i === 0) {
-            outstr = wxkeymap.get(vals[i]);
+            outstr = wxCodeKeymap.get(vals[i]);
         }
         else {
-            outstr += `\n${wxkeymap.get(vals[i])}`;
+            outstr += ` / ${wxCodeKeymap.get(vals[i])}`;
         }
     }
     return outstr;

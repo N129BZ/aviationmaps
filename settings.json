@@ -9,7 +9,7 @@
     "wsport": 5050,
     "startupzoom": 9,
     "useOSMonlinemap": true,
-    "debug": true,
+    "debug": false,
     "sectionalDb": "Sectional.mbtiles",
     "terminalDb": "Terminal.mbtiles",
     "helicopterDb": "Helicopter.mbtiles",
