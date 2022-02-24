@@ -2,8 +2,7 @@ html, body {
     margin: 0;
     height: 100%;
     width: 100%;
-  }
-  
+}
 #map {
     position: absolute;
     top:0px;
@@ -95,6 +94,51 @@ html, body {
     font-family: Arial, Helvetica, sans-serif;
     font-size: 18px;
 }
+.taf {
+    width: 400px;
+    height: 500px;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+.tafmessage {
+    border: 2px;
+    width: 400px;
+}
+.taflabel {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: smaller;
+}
+.tafheader {
+    background-color: #080e8c;
+    color: #ffffff;
+    font-family: Arial, Helvetica, sans-serif; 
+    font-weight: bold;
+    font-size:medium;
+}
+.tafsubheader {
+    background-color:lavender;
+    color:#000000;
+    font-family: Arial, Helvetica, sans-serif;
+    font-weight:bold;
+    font-size: smaller;
+    width: 400px;
+}
+.fcstlabel {
+    background-color:lavender;
+    color:#000000;
+    font-family: Arial, Helvetica, sans-serif;
+    font-weight: bold;
+    font-size: smaller;
+    width:400px;
+}
+.tafdata {
+    background-color: white;
+    color: #000000;
+    font-family: Arial, Helvetica, sans-serif;
+    font-weight:normal;
+    font-size: smaller;
+    width: 100%;
+}
 .ol-popup {
     position: absolute;
     background-color: white;
@@ -105,9 +149,8 @@ html, body {
     bottom: 12px;
     left: -50px;
     min-width: 280px;
-  }
-
-  .ol-popup:after, .ol-popup:before {
+}
+.ol-popup:after, .ol-popup:before {
     top: 100%;
     border: solid transparent;
     content: " ";
@@ -115,34 +158,30 @@ html, body {
     width: 0;
     position: absolute;
     pointer-events: none;
-  }
-
-  .ol-popup:after {
+}
+.ol-popup:after {
     border-top-color: white;
     border-width: 10px;
     left: 48px;
     margin-left: -10px;
-  }
-
-  .ol-popup:before {
+}
+.ol-popup:before {
     border-top-color: #cccccc;
     border-width: 11px;
     left: 48px;
     margin-left: -11px;
-  }
-
-  .ol-popup-closer {
+}
+.ol-popup-closer {
     text-decoration:none;
     position: absolute;
     font-family: Arial, Helvetica, sans-serif;
     font-weight: bolder;
     color:darkgrey;
-    top: 88%;
-    left: 46%;
-  }
-  
-  .dot {
+    top: 90%;
+    left: 77%;
+}
+.dot {
       width:45px;
       height:45px;
       visibility: hidden;
-  }
+}

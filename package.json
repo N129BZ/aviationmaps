@@ -11,6 +11,7 @@
     "express": "^4.17.2",
     "fast-xml-parser": "^4.0.3",
     "fs": "^0.0.1-security",
+    "jquery": "^3.6.0",
     "math": "0.0.3",
     "serve-favicon": "^2.5.0",
     "sqlite3": "^5.0.2",

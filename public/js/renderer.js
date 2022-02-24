@@ -1,11 +1,19 @@
 'use strict';
 
+
 /**
  * Construct all of the application urls 
  */
-let URL_HOST_BASE           = window.location.hostname + (window.location.port ? ':' + window.location.port : '');
-let URL_HOST_PROTOCOL       = window.location.protocol + "//";
+let URL_LOCATION            =  location.hostname;
+let URL_PROTOCOL            =  location.protocol;
+let URL_PORT                =  location.port;          
+let URL_HOST_BASE           =  URL_LOCATION;
+if (parseInt(URL_PORT) > 0) {
+    URL_HOST_BASE += `:${URL_PORT}`;
+}
+let URL_HOST_PROTOCOL       = `${URL_PROTOCOL}//`;
 let URL_SERVER              = `${URL_HOST_PROTOCOL}${URL_HOST_BASE}`;
+let URL_WINSOCK             = `ws://${URL_LOCATION}:`;
 let URL_GET_TILESETS        = `${URL_SERVER}/tiles/tilesets`;
 let URL_GET_VFRSEC_TILE     = `${URL_SERVER}/tiles/vfrsectile/{z}/{x}/{-y}.png`;
 let URL_GET_TERM_TILE       = `${URL_SERVER}/tiles/termtile/{z}/{x}/{-y}.png`;
@@ -19,6 +27,7 @@ let URL_PUT_HISTORY         = `${URL_SERVER}/puthistory`;
 let URL_GET_AIRPORTS        = `${URL_SERVER}/getairports`;
 let URL_GET_HELIPORTS       = `${URL_SERVER}/getheliports`;
 
+
 /**
  * global properties
  */
@@ -27,6 +36,10 @@ let last_longitude = 0;
 let last_latitude = 0;
 let last_heading = 0;
 let currentZoom = 10;
+let lastcriteria = "allregions";
+let tafkeymap = new Map();
+
+loadTafKeyMap();
 
 /**
  * ol.Collections hold features like
@@ -35,15 +48,13 @@ let currentZoom = 10;
 let metarFeatures = new ol.Collection();
 let airportFeatures = new ol.Collection();
 let tafFeatures = new ol.Collection();
-let heliportFeatures = new ol.Collection();
 
 /**
  * Vector sources
  */
-let metarsVectorSource;
-let allAirportsVectorSource;
-let tafsVectorSource;
-let heliportsVectorSource;
+let metarVectorSource;
+let airportVectorSource;
+let tafVectorSource;
 let animatedWxTileSource;
 
 /**
@@ -62,21 +73,20 @@ let debugTileLayer;
 /**
  * Vector layers
  */
-let airportsVectorLayer;
-let metarsVectorLayer;
-let tafsVectorLayer;
-let heliportsVectorLayer;
-
+let airportVectorLayer;
+let metarVectorLayer;
+let tafVectorLayer;
 
 /**
  * Websocket object, flag, and message definition
- * JSON object that is filled by returned settings
+ * JSON object that is filled by returned settingsws://${window.location.hostname}
  */
 let websock;
 let wsOpen = false;
 let MessageTypes = {};
 let DistanceUnits = {};
 let distanceunit = "";
+
 /**
  * Animation variables 
  */
@@ -92,10 +102,107 @@ const regioncontrol = document.getElementById('isoregion');
 const regionselect = document.getElementById("regionselect");
 let regionmap = new Map();
 
-/**
- * Icon markers for different weather categories 
+/** 
+ * Request settings JSON object from serverself
  */
-let mvfrMarker = new ol.style.Icon({
+ $.get({
+    async: false,
+    type: "GET",
+    url: URL_GET_SETTINGS,
+    success: (data) => {
+        try {
+            settings = JSON.parse(data);
+            MessageTypes = settings.messagetypes;
+            DistanceUnits = settings.distanceunits;
+            distanceunit = settings.distanceunit;
+            currentZoom = settings.startupzoom;
+        }
+        catch(err) {
+            console.log(err);
+        }
+    },
+    error: (xhr, ajaxOptions, thrownError) => {
+        console.error(xhr.status, thrownError);
+    }
+});
+
+/**
+ * Request Initial ownship position latitude & longitude.
+ * Data is stored in the sqlite positionhistory.db file.
+ * This will also center the viewport on that position.
+ */
+ $.get({
+    async: false,
+    type: "GET",
+    url: URL_GET_HISTORY,
+    success: (data) => {
+        try {
+            let histobj = JSON.parse(data);
+            last_longitude = histobj.longitude;
+            last_latitude = histobj.latitude;
+            last_heading = histobj.heading;
+        }
+        catch (err) {
+            console.log(err);
+        }
+    },
+    error: (xhr, ajaxOptions, thrownError) => {
+        console.error(xhr.status, thrownError);
+    }
+});
+
+/**
+ * JQuery method to immediately initialize the websocket connection
+ */
+ $(() => { 
+    try {
+        let wsurl = `${URL_WINSOCK}${settings.wsport}`;
+        console.log(`OPENING: ${wsurl}`);
+        websock = new WebSocket(wsurl);
+        websock.onmessage = (evt) => {
+            let message = JSON.parse(evt.data);
+            let payload = JSON.parse(message.payload); 
+            switch (message.type) {
+                case MessageTypes.airports.type:
+                    loadAirportsCollection(payload);
+                    break;
+                case MessageTypes.metars.type:
+                    processMetars(payload);
+                    break;
+                case MessageTypes.tafs.type:
+                    processTafs(payload);
+                    break;
+                case MessageTypes.pireps.type:
+                    //console.log(message.payload);
+                    break;
+            }
+        }
+
+        websock.onerror = function(evt){
+            console.log("Websocket ERROR: " + evt.data);
+        }
+        
+        websock.onopen = function(evt) {
+            console.log("Websocket CONNECTED.");
+            wsOpen = true;
+            keepAlive();
+        }
+        
+        websock.onclose = function(evt) {
+            cancelKeepAlive();
+            wsOpen = false;
+            console.log("Websocket CLOSED.");
+        }
+    }
+    catch (error) {
+        console.log(error);
+    }
+});
+
+/**
+ * Icon markers for different weather/airport categories 
+ */
+ let mvfrMarker = new ol.style.Icon({
     crossOrigin: 'anonymous',
     src: `${URL_SERVER}/img/mvfr.png`,
     size: [45, 45],
@@ -134,13 +241,13 @@ let lifrMarker = new ol.style.Icon({
 let tafMarker = new ol.style.Icon({
     crossOrigin: 'anonymous',
     src: `${URL_SERVER}/img/taf.png`,
-    size: [45, 45],
+    size: [85, 85],
     offset: [0, 0],
     opacity: 1,
     scale: .55
 });
 /*--------------------------------------*/
-let circleMarker = new ol.style.Icon({
+let airportMarker = new ol.style.Icon({
     crossOrigin: 'anonymous',
     src: `${URL_SERVER}/img/dot.png`,
     size: [45, 45],
@@ -176,124 +283,12 @@ const lifrStyle = new ol.style.Style({
 const tafStyle = new ol.style.Style({
     image: tafMarker
 })
-const circleStyle = new ol.style.Style({
-    image: circleMarker
+const airportStyle = new ol.style.Style({
+    image: airportMarker
 });
 const heliportStyle = new ol.style.Style({
     image: heliportMarker
 });
-
-/**
- * JQuery method to immediately initialize the websocket connection
- */
- $(() => { 
-    try {
-        let wsurl = `ws://${window.location.hostname}:${settings.wsport}`;
-        console.log(`OPENING: ${wsurl}`);
-        websock = new WebSocket(wsurl);
-        websock.onmessage = (evt) => {
-            let message = JSON.parse(evt.data);
-            let payload = JSON.parse(message.payload);
-            switch (message.type) {
-                case MessageTypes.airports.type:
-                    loadAirportsCollection(payload);
-                    break;
-                // case MessageTypes.heliports.type:
-                //     loadHeliportsCollection(payload);
-                //     break;    
-                case MessageTypes.metars.type:
-                    processMetars(payload);
-                    break;
-                case MessageTypes.tafs.type:
-                    processTafs(payload);
-                    break;
-                case MessageTypes.pireps.type:
-                    //console.log(message.payload);
-                    break;
-            }
-        }
-
-        websock.onerror = function(evt){
-            console.log("Websocket ERROR: " + evt.data);
-        }
-        
-        websock.onopen = function(evt) {
-            console.log("Websocket CONNECTED.");
-            wsOpen = true;
-            keepAlive();
-        }
-        
-        websock.onclose = function(evt) {
-            cancelKeepAlive();
-            wsOpen = false;
-            console.log("Websocket CLOSED.");
-        }
-    }
-    catch (error) {
-        console.log(error);
-    }
-});
-
-/** 
- * Request settings JSON object from serverself
- */
-$.get({
-    async: false,
-    type: "GET",
-    url: URL_GET_SETTINGS,
-    success: (data) => {
-        try {
-            settings = JSON.parse(data);
-            MessageTypes = settings.messagetypes;
-            DistanceUnits = settings.distanceunits;
-            distanceunit = settings.distanceunit;
-            currentZoom = settings.startupzoom;
-        }
-        catch(err) {
-            console.log(err);
-        }
-    },
-    error: function (request, status, err) {
-        console.error(`ERROR PARSING SETTINGS: ${err}`);
-    }
-});
-
-/**
- * Request Initial ownship position latitude & longitude.
- * Data is stored in the sqlite positionhistory.db file.
- * This will also center the viewport on that position.
- */
- $.get({
-    async: false,
-    type: "GET",
-    url: URL_GET_HISTORY,
-    success: (data) => {
-        try {
-            let histobj = JSON.parse(data);
-            last_longitude = histobj.longitude;
-            last_latitude = histobj.latitude;
-            last_heading = histobj.heading;
-        }
-        catch (err) {
-            console.log(err);
-        }
-    },
-    error: function (xhr, ajaxOptions, thrownError) {
-        console.error(xhr.status, thrownError);
-    }
-});
-
-// /**
-//  * Async $get for list of heliports
-//  */
-//  $.get({
-//     async: true,
-//     type: "GET",
-//     url: URL_GET_HELIPORTS,
-//     error: function (request, status, err) {
-//         console.error(`ERROR GETTING HELIPORTS: ${err}`);
-//     }
-// });
 
 /**
  * Async $get for list of airports
@@ -327,7 +322,12 @@ function loadAirportsCollection(jsonobj) {
                 geometry: new ol.geom.Point(ol.proj.fromLonLat([lon, lat]))
             });
             airportmarker.setId(airport.ident);
-            airportmarker.setStyle(circleStyle);
+            if (airport.type === "heliport") {
+                airportmarker.setStyle(heliportStyle);
+            }
+            else {
+                airportmarker.setStyle(airportStyle);
+            }
             airportFeatures.push(airportmarker);
         }
 
@@ -350,56 +350,35 @@ function loadAirportsCollection(jsonobj) {
     }
 }
 
-// /**
-//  * Load heliports into their feature collection
-//  * @param {*} jsonobj 
-//  */
-// function loadHeliportsCollection(jsonobj) {
-//     try {
-//         for (let i=0; i< jsonobj.airports.length; i++) {
-//             let airport = jsonobj.airports[i];
-//             let lon = airport.lon;
-//             let lat = airport.lat;
-//             let heliportmarker = new ol.Feature({
-//                 ident: airport.ident,
-//                 type: airport.type,
-//                 name: airport.name,
-//                 isoregion: isoregion,
-//                 geometry: new ol.geom.Point(ol.proj.fromLonLat([lon, lat]))
-//             });
-//             heliportmarker.setId(airport.ident);
-//             heliportmarker.setStyle(heliportStyle);
-//             heliportFeatures.push(heliportmarker);
-//         }
-//     }
-//     catch(err){
-//         console.error(err);
-//     }
-// }
-
 /**
  * Region dropdown select event
  */
 regionselect.addEventListener('change', (event) => {
-    let criteria = event.target.value;
-    selectStateFeatures(criteria);
+    lastcriteria = event.target.value;
+    selectFeaturesByCriteria();
 });
 
 /**
  * Called by select event to manipulate features
  * @param {*} criteria: string
  */
-function selectStateFeatures(criteria = "allregions") {
+function selectFeaturesByCriteria() {
     airportFeatures.forEach((feature) => {
         let type = feature.get("type");
         let isoregion = feature.get("isoregion");
-        feature.setStyle(circleStyle);
-        if (criteria == "small_airport" || criteria == "medium_airport" || criteria == "large_airport") {
-            if (type !== criteria) {
+        if (type === "heliport") {
+            feature.setStyle(heliportStyle);
+        }
+        else {
+            feature.setStyle(airportStyle);
+        }
+        if (lastcriteria === "small_airport" || lastcriteria === "medium_airport" || 
+            lastcriteria === "large_airport" || lastcriteria === "heliport") {
+            if (type !== lastcriteria) {
                 feature.setStyle(new ol.style.Style(undefined));
             }
         }
-        else if (isoregion !== criteria && criteria !== "allregions") {
+        else if (isoregion !== lastcriteria && lastcriteria !== "allregions") {
             feature.setStyle(new ol.style.Style(undefined));        
         }
     });
@@ -505,23 +484,20 @@ myairplane.setPosition(viewposition);
 map.addOverlay(myairplane);
 
 /**
- * Event to handle Metar popup or closure
+ * Event to handle scaling of feature images
  */
 map.on('pointermove', (evt) => {
-    let hasfeature = false;
-    currentZoom = map.getView().getZoom();
-    resizeDots();
-    map.forEachFeatureAtPixel(evt.pixel, (feature) => {
-        if (feature) {
-            hasfeature = true;
-        }
-    });
-    if (!hasfeature) {
-        popupcloser.onclick();
+    //let hasfeature = false;
+    let someZoom = map.getView().getZoom();
+    if (currentZoom !== someZoom) {
+        currentZoom = someZoom;
+        resizeDots();
     }
 });
 
-
+/**
+ * Event to view Metar/TAF popup & closure
+ */
 map.on('singleclick', (evt) => {
     let hasfeature = false;
     currentZoom = map.getView().getZoom();
@@ -543,8 +519,15 @@ map.on('singleclick', (evt) => {
             popupoverlay.setPosition(coordinate);
         }
     });
+    if (!hasfeature) {
+        popupcloser.onclick();
+    }
 });
 
+/**
+ * Create the html for a METAR popup element
+ * @param {*} feature: the metar the user clicked on 
+ */
 function createMetarPopup(feature) {
     let thismetar = feature.get("metar");
     let ident = thismetar.station_id;
@@ -603,7 +586,7 @@ function createMetarPopup(feature) {
     if (ident != "undefined") {
         let name = ""
         try {
-            name = allAirportsVectorSource.getFeatureById(ident).get("name") + ", ";
+            name = airportVectorSource.getFeatureById(ident).get("name") + ", ";
         }
         catch(error) {
             console.log("Airport name NOT FOUND!");
@@ -625,90 +608,93 @@ function createMetarPopup(feature) {
     }
 }
 
+/**
+ * Create the html for a TAF popup element
+ * @param {*} feature: the taf the user clicked on
+ */
 function createTafPopup(feature) {
     let thistaf = feature.get("taf");
-    let ident = thistaf.station_id;
-    let cat = thistaf.flight_category;
-    if (cat == undefined || cat == "undefined"){
-        cat = "VFR";
-    }
-    let time = thistaf.observation_time;
-    if (settings.uselocaltimeformetars){
-        time = getLocalTimeZone(time);
-    }
-    let temp = convertCtoF(thistaf.temp_c);
-    let dewp = convertCtoF(thistaf.dewpoint_c);
-    let windir = thistaf.wind_dir_degrees;
-    let winspd = thistaf.wind_speed_kt + "";
-    let wingst = thistaf.wind_gust_kt + ""; 
-    let altim = getAltimeterSetting(thistaf.altim_in_hg);
-    let vis = getDistanceUnits(thistaf.visibility_statute_mi);
-    let skyconditions = "";
-    try {
-        let sky = [];
-        if (thistaf.sky_condition !== undefined) {    
-            thistaf.sky_condition.forEach((condition) => {
-                let map = Object.entries(condition);
-                map.forEach((item) => {
-                    sky.push(item);  
-                });
-            });
-        }
-        sky.forEach((level) => {
-            let str = replaceAll(level[0], "_", " ");
-            str = str.charAt(0).toUpperCase() + str.substring(1);
-            skyconditions += `${str}:&nbsp<b>${level[1]}</b><br/>`;
-        });
-    }
-    catch(error){
-        console.log(error.message);
-    }
+    let forecast = thistaf.forecast;
     
-    let label = `<label class="#class">`;
-    let css;
-    switch(cat) {
-        case "IFR":
-            css = label.replace("#class", "metarifr");
-            break;
-        case "LIFR":
-            css = label.replace("#class", "metarlifr");
-            break;
-        case "MVFR":
-            css = label.replace("#class", "metarmvfr");
-            break;
-        case "VFR":
-            css = label.replace("#class", "metarvfr");
-            break;
-    }
-    if (ident != "undefined") {
-        let name = ""
-        try {
-            name = allAirportsVectorSource.getFeatureById(ident).get("name") + ", ";
-        }
-        catch(error) {
-            console.log("Airport name NOT FOUND!");
-        }
-        let html = `<div id="#featurepopup"><pre><code><p>`
-        html +=    `${css}&nbsp&nbsp${name}${ident} - ${cat}&nbsp&nbsp</label><p></p>`;
-        html +=   (time != "" && time != "undefined") ? `Time:&nbsp<b>${time}</b><br/>` : "";
-        html +=   (temp != "" && temp != "undefined") ? `Temp:&nbsp<b>${temp}</b><br/>` : "";
-        html +=   (dewp != "" && dewp != "undefined") ?`Dewpoint:&nbsp<b>${dewp}</b><br/>` : "";
-        html += (windir != "" && windir != "undefined") ? `Wind Dir:&nbsp<b>${windir}</b><br/>` : "";
-        html += (winspd != "" && winspd != "undefined") ? `Wind Speed:&nbsp<b>${winspd}&nbspkt</b><br/>` : "";
-        html += (wingst != "" && wingst != "undefined") ? `Wind Gust:&nbsp<b>${wingst}&nbspkt</b><br/>` : "";
-        html +=  (altim != "" && altim != "undefined") ? `Altimeter:&nbsp<b>${altim}&nbsphg</b><br/>` : "";
-        html +=    (vis != "" && vis != "undefined") ? `Visibility:&nbsp<b>${vis}</b><br/>` : "";
-        html += (skyconditions != "" && skyconditions != "undefined") ? `${skyconditions}` : "";
-        html += `</p></code></pre></div>`;
-        popupcontent.innerHTML = html;    
-    }
+    let outerhtml = `<div class="taf">` +
+                    `<table class="tafmessage" id="taftable">` +
+                    `<thead>` +
+                    `<th class="tafheader">FORECAST</th>` +
+                    `</thead>` + 
+                    `<tr>` + 
+                    `<td id="tafdata">###</td>` +
+                    `</tr>` +
+                    `</table>` + 
+                    `</div>`;
+    let html = "<div>";
+
+    Object.values(forecast).forEach((value) => {
+        html += "<p>";
+        Object.keys(value).forEach((key) => {
+            let subobj = value[key];
+            let cleankey = replaceAll(key, "_", " ")
+            switch (key) {
+                case "fcst_time_from":
+                case "fcst_time_to":
+                    html += `<label class="tafsubheader">${cleankey}: ${subobj}</label><br />`;
+                    break;
+                case "change_indicator":
+                case "time_becoming":
+                case "probability":
+                case "wind_dir_degrees":
+                case "wind_speed_kt":
+                case "wind_gust_kt":
+                case "wind_shear_hgt_ft_agl":
+                case "wind_shear_dir_degrees":
+                case "wind_shear_speed_kt":
+                case "altim_in_hg":
+                case "vert_vis_ft":
+                case "wx_string":
+                    html += `<label class="taflabel">${tafkeymap.get(key)}: ${subobj}</label><br />`;
+                    break;
+                case "sky_condition":
+                    html += `<label class="tafsubheader">${cleankey}</label><br />`;
+                    Object.values(subobj).forEach((condition) => {
+                        Object.keys(condition).forEach((conditionkey) => {
+                            let cleancdnkey = replaceAll(conditionkey, "_", " ");
+                            let sublabel = `<label class="taflabel">${cleancdnkey}: ${condition[conditionkey]}</label><br />`;
+                            console.log(sublabel);
+                            html += sublabel;
+                        });
+                    });        
+                    break;
+                case "turbulence_condition":
+                case "icing_condition":
+                    html += `<label class="tafsubheader">${cleankey}</label><br />`;
+                    Object.values(subobj).forEach((condition) => {
+                        Object.keys(subobj).forEach((condkey) => {
+                            let sublabel = `<label class="taflabel">${condkey}: ${condition}</label><br />`;
+                            console.log(sublabel);
+                            html += sublabel;
+                        });
+                    });        
+                    break;
+                case "temperature":
+                    break;
+
+            }
+        });
+        html += "</p>";
+    });
+    html += "</div>";
+    html = outerhtml.replace("###", html);
+    popupcontent.innerHTML = html;
 }
 
+/**
+ * Build the html for an airport feature
+ * @param {*} feature: the airport the user clicked on 
+ */
 function createAirportPopup(feature) {
     let ident = feature.get("ident");
     let name = ""
     try {
-        name = allAirportsVectorSource.getFeatureById(ident).get("name") + ", ";
+        name = airportVectorSource.getFeatureById(ident).get("name") + ", ";
     }
     catch(error) {
         console.log("Airport name NOT FOUND!");
@@ -738,24 +724,23 @@ function processMetars(metarsobject) {
                     geometry: new ol.geom.Point(ol.proj.fromLonLat([metar.longitude, metar.latitude])) 
                 });
                 feature.setId(metar.station_id);
-                metarFeatures.push(feature);
                 try {
                     switch (metar.flight_category) {
-                        case 'MVFR':
-                            feature.setStyle(mvfrStyle);
+                        case 'IFR':
+                            feature.setStyle(ifrStyle)
                             break;
                         case 'LIFR':
                             feature.setStyle(lifrStyle);
                             break;
-                        case 'IFR':
-                            feature.setStyle(ifrStyle)
+                        case 'MVFR':
+                            feature.setStyle(mvfrStyle);
                             break;
                         case 'VFR':
                         default:
                             feature.setStyle(vfrStyle);
                             break;
                     }
-                    feature.changed();
+                    metarFeatures.push(feature);
                 }
                 catch(error){
                    console.log(error.message); 
@@ -810,7 +795,8 @@ function resizeDots() {
     lifrMarker.setScale(newscale);
     ifrMarker.setScale(newscale);
     tafMarker.setScale(newscale);
-    circleMarker.setScale(newscale);
+    airportMarker.setScale(newscale);
+    heliportMarker.setScale(newscale);
 }
 
 /**
@@ -937,55 +923,43 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
         });
     }
 
-    metarsVectorSource = new ol.source.Vector({
+    metarVectorSource = new ol.source.Vector({
         features: metarFeatures
     });
-    metarsVectorLayer = new ol.layer.Vector({
+    metarVectorLayer = new ol.layer.Vector({
         title: "Metars",
-        source: metarsVectorSource,
+        source: metarVectorSource,
         visible: false,
         extent: extent,
         zIndex: 11
     }); 
 
-    // heliportsVectorSource = new ol.layer.Vector({
-    //      features: heliportFeatures
-    // });
-    // heliportsVectorLayer = new ol.layer.Vector({
-    //      title: "Heliports",
-    //      source: heliportsVectorSource,
-    //      visible: false,
-    //      extent: extent,
-    //      zIndex: 11
-    // });
-
-    allAirportsVectorSource = new ol.source.Vector({
+    airportVectorSource = new ol.source.Vector({
         features: airportFeatures
     });
-    airportsVectorLayer = new ol.layer.Vector({
+    airportVectorLayer = new ol.layer.Vector({
         title: "All Airports",
-        source: allAirportsVectorSource,
+        source: airportVectorSource,
         visible: false,
         extent: extent,
         zIndex: 11
     }); 
     
-    tafsVectorSource = new ol.source.Vector({
+    tafVectorSource = new ol.source.Vector({
         features: tafFeatures
     });
-    tafsVectorLayer = new ol.layer.Vector({
+    tafVectorLayer = new ol.layer.Vector({
         title: "TAFs",
-        source: tafsVectorSource,
+        source: tafVectorSource,
         visible: false,
         extent: extent,
         zIndex: 10
     });
-        
+    
     map.addLayer(debugTileLayer);
-    map.addLayer(airportsVectorLayer);
-    map.addLayer(metarsVectorLayer); 
-    map.addLayer(tafsVectorLayer);
-    //map.addLayer(heliportsVectorLayer);
+    map.addLayer(airportVectorLayer);
+    map.addLayer(metarVectorLayer); 
+    map.addLayer(tafVectorLayer);
     map.addLayer(animatedWxTileLayer);
     map.addLayer(caribbeanTileLayer);
     map.addLayer(grandcanyonAoTileLayer);
@@ -1004,13 +978,13 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
     });
     map.addControl(layerSwitcher);
 
-    airportsVectorLayer.on('change:visible', () => {
-        let visible = airportsVectorLayer.get('visible');
+    airportVectorLayer.on('change:visible', () => {
+        let visible = airportVectorLayer.get('visible');
         regioncontrol.style.visibility = visible ? 'visible' : 'hidden';
         if (visible) {
             regionselect.options[0].selected = true;
-            regionselect.value = "allregions"; 
-            selectStateFeatures()
+            regionselect.value = lastcriteria; 
+            selectFeaturesByCriteria()
         }
     });
 
@@ -1105,7 +1079,8 @@ startButton.addEventListener('click', playWeatherRadar, false);
 const stopButton = document.getElementById('pause');
 stopButton.addEventListener('click', stopWeatherRadar, false);
 
-/**
+/**    fieldvalues.set(key, `<td>${subobj}</td>`);
+            
  * Sets an initial time in the timeclock element
  */
 updateInfo();
@@ -1116,7 +1091,7 @@ updateInfo();
  * @returns statute miles, kilometers or nautical miles   
  */
  function getDistanceUnits(miles) {
-    let num = miles;
+    let num = parseFloat(miles);
     let label = "mi";
     switch (distanceunit) {
         case DistanceUnits.kilometers: 
@@ -1140,51 +1115,6 @@ const convertCtoF = ((temp) => {
     let num = (temp * 9/5 + 32);
     return num.toFixed(1);
 });
-
-/**
- * Builds a HTML Table out of a JSON obje
- * @param {*} selector 
- */
-function buildHtmlTable(selector) {
-    let columns = addAllColumnHeaders(myList, selector);
-  
-    for (let i = 0; i < myList.length; i++) {
-        let row$ = $('<tr/>');
-        for (let colIndex = 0; colIndex < columns.length; colIndex++) {
-            let cellValue = myList[i][columns[colIndex]];
-            if (cellValue == null || cellValue == undefined || cellValue == "undefined") {
-                cellValue = "";
-            }
-            row$.append($('<td/>').html(cellValue));
-        }
-        $(selector).append(row$);
-    }
-}
-  
-/**
- * Adds a header row to the table and returns the set of columns.
- * Need to do union of keys from all records as some records may not contain
- * all records. 
- * @param {*} myList 
- * @param {*} selector 
- * @returns HTML Table Column headers
- */
-function addAllColumnHeaders(myList, selector) {
-    let columnSet = [];
-    let headerTr$ = $('<tr/>');
-  
-    for (let i = 0; i < myList.length; i++) {
-        let rowHash = myList[i];
-        for (let key in rowHash) {
-            if ($.inArray(key, columnSet) == -1) {
-                columnSet.push(key);
-                headerTr$.append($('<th/>').html(key));
-            }
-        }
-    }
-    $(selector).append(headerTr$);
-    return columnSet;
-  }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -1333,4 +1263,21 @@ function getLocalTimeZone(zuludate) {
 function getAltimeterSetting(altimeter) {
     let dbl = parseFloat(altimeter);
     return dbl.toFixed(2).toString();
+}
+
+function loadTafKeyMap() {
+    tafkeymap.set("fcst_time_from", "time from");
+    tafkeymap.set("fcst_time_to", "time to");
+    tafkeymap.set("change_indicator", "change indicator");
+    tafkeymap.set("time_becoming", "time becoming");
+    tafkeymap.set("probability", "probability");
+    tafkeymap.set("wind_dir_degrees", "direction °");
+    tafkeymap.set("wind_speed_kt", "speed kt");
+    tafkeymap.set("wind_gust_kt", "gust kt");
+    tafkeymap.set("wind_shear_hgt_ft_agl", "shear height ft agl");
+    tafkeymap.set("wind_shear_dir_degrees", "shear direction °");
+    tafkeymap.set("wind_shear_speed_kt", "shear speed kt");
+    tafkeymap.set("altim_in_hg", "altimeter (hg)");
+    tafkeymap.set("vert_vis_ft", "vert visibility ft");
+    tafkeymap.set("wx_string", "weather");
 }
