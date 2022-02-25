@@ -37,6 +37,8 @@ let last_latitude = 0;
 let last_heading = 0;
 let currentZoom = 9;
 let lastcriteria = "allregions";
+
+let airportNameKeymap = new Map();
 let tafFieldKeymap = new Map();
 let metarFieldKeymap = new Map();
 let weatherCodeKeymap = new Map();
@@ -316,17 +318,23 @@ $.get({
  * @param {*} jsonobj: JSON object 
  */
 function loadAirportsCollection(jsonobj) {
+    let usastates = new Map();
+    let isoregions = new Map();
     try {
         for (let i=0; i< jsonobj.airports.length; i++) {
             let airport = jsonobj.airports[i];
             let lon = airport.lon;
             let lat = airport.lat;
-            let isoregion = airport.isoregion.replace("US-", "");
-            regionmap.set(isoregion, isoregion);
+            let isoregion = airport.isoregion;
+            if (isoregion.search("US-") > -1) { 
+                usastates.set(isoregion, isoregion);
+            } 
+            else {
+                isoregions.set(isoregion, isoregion);
+            }
             let airportmarker = new ol.Feature({
                 ident: airport.ident,
                 type: airport.type,
-                name: airport.name,
                 isoregion: isoregion,
                 geometry: new ol.geom.Point(ol.proj.fromLonLat([lon, lat]))
             });
@@ -338,19 +346,32 @@ function loadAirportsCollection(jsonobj) {
                 airportmarker.setStyle(airportStyle);
             }
             airportFeatures.push(airportmarker);
+            airportNameKeymap.set(airport.ident, airport.name);
         }
 
         /**
          * This is for the region select dropdown list
-         * Map sort all region airports in alpha order by state/country
+         * Map sort all region airports in alpha order by US state 
+         * we want US states to be at the top of the list followed
+         * by the rest of the isoregions 
          */
-        regionmap[Symbol.iterator] = function* () {
-            yield* [...this.entries()].sort((a, b) => a[1] - b[1]);
-        }
-        regionmap.forEach((region) => { 
+        //usastates[Symbol.iterator] = function* () {
+        //    yield* [...this.entries()].sort((a, b) => a[1] - b[1]);
+        //}
+        usastates.forEach((isoregion) => {
             let option = document.createElement("option");
-            option.value = region;
-            option.text = region;
+            option.value = isoregion;
+            option.text = isoregion;
+            regionselect.appendChild(option);
+        });
+        
+        //regionmap[Symbol.iterator] = function* () {
+        //    yield* [...this.entries()].sort((a, b) => a[1] - b[1]);
+        //}
+        isoregions.forEach((isoregion) => { 
+            let option = document.createElement("option");
+            option.value = isoregion;
+            option.text = isoregion;
             regionselect.appendChild(option);
         });
     }
@@ -589,7 +610,7 @@ function createMetarPopup(feature) {
     if (ident != "undefined") {
         let name = ""
         try {
-            name = airportVectorSource.getFeatureById(ident).get("name") + ", ";
+            name = airportNameKeymap.get(ident) + ", ";
         }
         catch(error) {
             console.log("Airport name NOT FOUND!");
@@ -653,6 +674,8 @@ function createTafPopup(feature) {
                     html += `<label class="fcstlabel">${from_to}</label><br />`;
                     break;
                 case "change_indicator":
+                case "temp_c":
+                case "dewpoint_c":
                 case "time_becoming":
                 case "probability":
                 case "wind_speed_kt":
@@ -786,14 +809,22 @@ function createAirportPopup(feature) {
     let ident = feature.get("ident");
     let name = ""
     try {
-        name = airportVectorSource.getFeatureById(ident).get("name") + ", ";
+        name = airportNameKeymap.get(ident);
+        if (name.length > 0) {
+            name = name.replace("/", "\n");
+            name = name.replace(",", "\n");
+        }
     }
     catch(error) {
         console.log("Airport name NOT FOUND!");
     }
     let html = `<div id="#featurepopup"><pre><code><p>`;
-        html += `&nbsp&nbsp${ident}&nbsp&nbsp</label><p></p>`;
+        html += `<label class="airportpopuplabel">${name} - ${ident}</label><p></p>`;
         html += `</p></code></pre></div>`;
+        
+        popupcloser.style.left = "27px";
+        popupcloser.style.top = "76%";
+        popupcontent.style.padding = "25px";
         popupcontent.innerHTML = html;  
 }
 
@@ -1045,7 +1076,7 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
         source: tafVectorSource,
         visible: false,
         extent: extent,
-        zIndex: 10
+        zIndex: 12
     });
     
     map.addLayer(debugTileLayer);

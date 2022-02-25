@@ -143,7 +143,7 @@ function loadAirportsJson() {
     sql = `SELECT ident, type, name, elevation_ft, longitude_deg, latitude_deg, iso_region ` + 
             `FROM airports ` +
             `WHERE type NOT IN ('closed') ` +
-            `ORDER BY iso_region ASC;`;
+            `ORDER BY iso_region ASC, name ASC;`;
     
     let jsonout = {
         "airports": []
