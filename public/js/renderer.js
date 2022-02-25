@@ -39,11 +39,15 @@ let currentZoom = 9;
 let lastcriteria = "allregions";
 let tafFieldKeymap = new Map();
 let metarFieldKeymap = new Map();
-let wxCodeKeymap = new Map();
+let weatherCodeKeymap = new Map();
+let icingCodeKeymap = new Map();
+let turbulenceCodeKeymap = new Map();
 
 loadTafFieldKeymap();
 loadMetarFieldKeymap();
-loadWxCodeKeymap();
+loadWeatherCodeKeymap();
+loadTurbulenceCodeKeymap();
+loadIcingCodeKeymap();
 
 /**
  * ol.Collections hold features like
@@ -551,7 +555,7 @@ function createMetarPopup(feature) {
     }
     let time = thismetar.observation_time;
     if (settings.uselocaltimeformetars) {
-        time = getLocalTimeZone(time);
+        time = getLocalTime(time);
     }
     let tempC = thismetar.temp_c;
     let dewpC = thismetar.dewpoint_c;
@@ -564,7 +568,7 @@ function createMetarPopup(feature) {
     let vis = getDistanceUnits(thismetar.visibility_statute_mi);
     let wxcode = thismetar.wx_string !== undefined ? decodeWxDescriptions(thismetar.wx_string) : "";
     let skyconditions = decodeSkyCondition(thismetar.sky_condition);
-    let icingconditions = decodeIcingCondition(thismetar.icing_condition);
+    let icingconditions = decodeIcingOrTurbulenceCondition(thismetar.icing_condition);
 
     let label = `<label class="#class">`;
     let css;
@@ -590,12 +594,14 @@ function createMetarPopup(feature) {
         catch(error) {
             console.log("Airport name NOT FOUND!");
         }
+        name = name.replace("/", "\n");
+        name = name.replace(",", "\n");
         let html = `<div id="#featurepopup"><pre><code><p>`
         html +=    `${css}&nbsp&nbsp${name}${ident} - ${cat}&nbsp&nbsp</label><p></p>`;
         html +=   (time != "" && time != "undefined") ? `Time:&nbsp<b>${time}</b><br/>` : "";
         html +=   (temp != "" && temp != "undefined") ? `Temp:&nbsp<b>${tempC} °C</b> (${temp})<br/>` : "";
         html +=   (dewp != "" && dewp != "undefined") ?`Dewpoint:&nbsp<b>${dewpC} °C</b> (${dewp})<br/>` : "";
-        html += (windir != "" && windir != "undefined") ? `Wind Dir:&nbsp<b>${windir}°</b><br/>` : "";
+        html += (windir != "" && windir != "undefined") ? `Wind Direction:&nbsp<b>${windir}°</b><br/>` : "";
         html += (winspd != "" && winspd != "undefined") ? `Wind Speed:&nbsp<b>${winspd}&nbspkt</b><br/>` : "";
         html += (wingst != "" && wingst != "undefined") ? `Wind Gust:&nbsp<b>${wingst}&nbspkt</b><br/>` : "";
         html +=  (altim != "" && altim != "undefined") ? `Altimeter:&nbsp<b>${altim}&nbsphg</b><br/>` : "";
@@ -617,7 +623,7 @@ function createTafPopup(feature) {
     let thistaf = feature.get("taf");
     let forecast = thistaf.forecast;
     let outerhtml = `<div class="taftitle">` + 
-                        `<label class="taftitlelabel">Terminal Area Forecast - ${feature.get("ident")}</label>` +
+                        `<label class="taftitlelabel">Terminal Area Forecast - ${feature.get("ident")}</label><p></p>` +
                     `</div>` +
                     `<div class="taf">` + 
                         `<pre><code>` +
@@ -632,39 +638,41 @@ function createTafPopup(feature) {
 
     let html = "<div>";
 
-    Object.values(forecast).forEach((value) => {
+    Object.values(forecast).forEach((forecastvalue) => {
         html += "<p>";
-        let fromto = `<label class="tafsubheader">`;
-        Object.keys(value).forEach((key) => {
-            let subobj = value[key];
-            let fieldname = tafFieldKeymap.get(key);
-            switch (key) {
+        let from_to = `<label class="tafsubheader">`;
+        Object.keys(forecastvalue).forEach((forecastkey) => {
+            let subobj = forecastvalue[forecastkey];
+            let fieldname = tafFieldKeymap.get(forecastkey);
+            switch (forecastkey) {
                 case "fcst_time_from":
-                    fromto += `<b>${subobj}</b>`;
+                    from_to += `<b>${subobj}</b>`;
                     break;
                 case "fcst_time_to":
-                    fromto += `&nbsp&nbspto&nbsp&nbsp<b>${subobj}</b></label><br />`
-                    html += `<label class="fcstlabel">${fromto}</label><br />`;
+                    from_to += `&nbsp&nbspto&nbsp&nbsp<b>${subobj}</b></label><br />`
+                    html += `<label class="fcstlabel">${from_to}</label><br />`;
                     break;
                 case "change_indicator":
                 case "time_becoming":
                 case "probability":
-                case "wind_dir_degrees":
                 case "wind_speed_kt":
                 case "wind_gust_kt":
                 case "wind_shear_hgt_ft_agl":
-                case "wind_shear_dir_degrees":
                 case "wind_shear_speed_kt":
                 case "altim_in_hg":
                 case "vert_vis_ft":
                 case "wx_string":
-                    if (key === "wx_string") {
+                    if (forecastkey === "wx_string") {
                         let lineval = decodeWxDescriptions(subobj);
                         html += `<label class="tafwxlabel">${fieldname}: <b>${lineval}</b></label><br />`;
                     }
                     else {
                         html += `<label class="taflabel">${fieldname}: <b>${subobj}</b></label><br />`;
                     }
+                    break;
+                case "wind_shear_dir_degrees":
+                case "wind_dir_degrees":
+                    html += `<label class="taflabel">${fieldname}: <b>${subobj}°</b></label><br />`;
                     break;
                 case "sky_condition":
                     html += `<label class="tafskyheader">${fieldname}</label><br />`;
@@ -673,7 +681,7 @@ function createTafPopup(feature) {
                 case "turbulence_condition":
                 case "icing_condition":
                     html += `<label class="tafskyheader">${fieldname}</label><br />`;
-                    html += decodeIcingCondition(subobj);
+                    html += decodeIcingOrTurbulenceCondition(subobj);
                     break;
                 case "temperature":
                     break;
@@ -689,14 +697,19 @@ function createTafPopup(feature) {
     popupcontent.innerHTML = html;
 }
 
-function decodeSkyCondition(skyjson) {
+/**
+ * Decode sky conditions
+ * @param {json object} skyobject 
+ * @returns html string 
+ */
+function decodeSkyCondition(skyobject) {
     let html = "";
-    if (skyjson !== undefined) {
-        let ovals = Object.values(skyjson);
-        let okeys = Object.keys(skyjson);
+    if (skyobject !== undefined) {
+        let skyvalues = Object.values(skyobject);
+        let skykeys = Object.keys(skyobject);
         let keycount = -1;
         try {
-            Object.values(skyjson).forEach((condition) => {
+            Object.values(skyobject).forEach((condition) => {
                 let cleankey = "";
                 let sublabel = "";
                 if (typeof(condition) !== "string") {
@@ -711,11 +724,11 @@ function decodeSkyCondition(skyjson) {
                 }
                 else {
                     keycount ++;
-                    cleankey = metarFieldKeymap.get(okeys[keycount]);
+                    cleankey = metarFieldKeymap.get(skykeys[keycount]);
                     if (cleankey === undefined || cleankey === "") {
-                        cleankey = replaceAll(okeys[keycount], "_", " ");
+                        cleankey = replaceAll(skykeys[keycount], "_", " ");
                     }
-                    sublabel = `<label class="taflabel">${cleankey}: <b>${ovals[keycount]}</b></label><br />`;
+                    sublabel = `<label class="taflabel">${cleankey}: <b>${skyvalues[keycount]}</b></label><br />`;
                     html += sublabel;
                 }
             });
@@ -727,15 +740,35 @@ function decodeSkyCondition(skyjson) {
     return html;
 }
 
-function decodeIcingCondition(icingjson) {
+/**
+ * Decode icing or turbulence condition
+ * @param {json object} conditionobject 
+ * @returns html string
+ */
+function decodeIcingOrTurbulenceCondition(conditionobject) {
     let html = "";
-    if (icingjson != undefined) {
+    if (conditionobject != undefined) {
         try {
-            Object.values(icingjson).forEach((condition) => {
-                Object.keys(icingjson).forEach((condkey) => {
-                    let sublabel = `<label class="taflabel">${replaceAll(condkey, "_", " ")}: <b>${condition}</b></label><br />`;
-                    html += sublabel;
-                });
+            let conditionvalues = Object.values(conditionobject);
+            let conditionkeys = Object.keys(conditionobject);
+            let turbulence = "";
+            let index = -1;
+            conditionvalues.forEach((condition) => {
+                index++;
+                // the first condition is the code, followed by min alt, then max alt
+                let conditionkey = conditionkeys[index];
+                if (index === 0) {
+                    turbulence = turbulenceCodeKeymap.get(condition);
+                }
+                else { 
+                    turbulence = condition;
+                    if (index === 2) { 
+                        index = -1; 
+                    }
+                }
+                let fieldlabel = conditionkey.replaceAll("_", " ");
+                let label = `<label class="taflabel">${fieldlabel}: <b>${turbulence}</b></label><br />`;
+                html += label;
             });
         }
         catch (error) {
@@ -744,6 +777,7 @@ function decodeIcingCondition(icingjson) {
     }
     return html;        
 }
+
 /**
  * Build the html for an airport feature
  * @param {*} feature: the airport the user clicked on 
@@ -1092,7 +1126,7 @@ function getTimeThreeHoursAgo() {
  */
 function updateInfo() {
     const el = document.getElementById('info');
-    el.innerHTML = getLocalTimeZone(startDate.toString());
+    el.innerHTML = getLocalTime(startDate.toString());
 }
 
 /**
@@ -1256,11 +1290,22 @@ function replaceAll(string, search, replace) {
 }
 
 /**
+ * This just makes a zulu date look nicer...
+ * @param {*} zuludate 
+ * @returns string: cleaned zulu date
+ */
+function formatZuluDate(zuludate) {
+    let workstring = zuludate.split("T");
+    let zstring = workstring[1].slice(0, -1);
+    return  `${workstring[0]} ${zstring} Z`;
+}
+
+/**
  * Get the local machine dae/time from the supplied ZULU date
  * @param {*} zuludate: the ZULU date to be translated 
  * @returns string: the translated date in standard or daylight time
  */
-function getLocalTimeZone(zuludate) {
+ function getLocalTime(zuludate) {
     let date = new Date(zuludate);
     let time = date.toString();
     let retval = time;
@@ -1335,11 +1380,11 @@ function loadTafFieldKeymap() {
     tafFieldKeymap.set("change_indicator", "Change indicator");
     tafFieldKeymap.set("time_becoming", "Time becoming");
     tafFieldKeymap.set("probability", "Probability");
-    tafFieldKeymap.set("wind_dir_degrees", "Wind Direction °");
+    tafFieldKeymap.set("wind_dir_degrees", "Wind Direction");
     tafFieldKeymap.set("wind_speed_kt", "Wind Speed kt");
     tafFieldKeymap.set("wind_gust_kt", "Wind Gust kt");
     tafFieldKeymap.set("wind_shear_hgt_ft_agl", "Shear height ft agl");
-    tafFieldKeymap.set("wind_shear_dir_degrees", "Shear direction °");
+    tafFieldKeymap.set("wind_shear_dir_degrees", "Shear direction");
     tafFieldKeymap.set("wind_shear_speed_kt", "Shear speed kt");
     tafFieldKeymap.set("altim_in_hg", "Altimeter (Hg)");
     tafFieldKeymap.set("vert_vis_ft", "Vertical vis. ft");
@@ -1363,7 +1408,7 @@ function loadTafFieldKeymap() {
     metarFieldKeymap.set("longitude", "longitude");
     metarFieldKeymap.set("temp_c", "Temp °C");
     metarFieldKeymap.set("dewpoint_c", "Dewpoint °C");
-    metarFieldKeymap.set("wind_dir_degrees", "Wind dir °"); 
+    metarFieldKeymap.set("wind_dir_degrees", "Wind direction"); 
     metarFieldKeymap.set("wind_speed_kt", "Wind speed kt");
     metarFieldKeymap.set("wind_gust_kt", "Wind gust kt");
     metarFieldKeymap.set("visibility_statute_mi", "Horiz. vis. statute mi.");
@@ -1394,74 +1439,74 @@ function loadTafFieldKeymap() {
 /**
  * Load the wxkeymap Map object with weather code descriptions
  */
-function loadWxCodeKeymap() {
-    wxCodeKeymap.set("FU", "Smoke");
-    wxCodeKeymap.set("VA", "Volcanic Ash");
-    wxCodeKeymap.set("HZ", "Haze");
-    wxCodeKeymap.set("DU", "Dust");
-    wxCodeKeymap.set("SA", "Sand");
-    wxCodeKeymap.set("BLDU", "Blowing dust");
-    wxCodeKeymap.set("BLSA", "Blowing sand");
-    wxCodeKeymap.set("PO", "Dust devil");
-    wxCodeKeymap.set("VCSS", "Vicinity sand storm");
-    wxCodeKeymap.set("BR", "Mist or light fog");
-    wxCodeKeymap.set("MIFG", "More or less continuous shallow fog");
-    wxCodeKeymap.set("VCTS", "Vicinity thunderstorm");
-    wxCodeKeymap.set("VIRGA", "Virga or precipitation not hitting ground");
-    wxCodeKeymap.set("VCSH", "Vicinity showers");
-    wxCodeKeymap.set("TS", "Thunderstorm with or without precipitation");
-    wxCodeKeymap.set("SQ", "Squalls");
-    wxCodeKeymap.set("FC", "Funnel cloud or tornado");
-    wxCodeKeymap.set("SS", "Sand or dust storm");
-    wxCodeKeymap.set("+SS", "Strong sand or dust storm");
-    wxCodeKeymap.set("BLSN", "Blowing snow");
-    wxCodeKeymap.set("DRSN", "Drifting snow");
-    wxCodeKeymap.set("VCFG", "Vicinity fog");
-    wxCodeKeymap.set("BCFG", "Patchy fog");
-    wxCodeKeymap.set("PRFG", "Fog, sky discernable");
-    wxCodeKeymap.set("FG", "Fog, sky undiscernable");
-    wxCodeKeymap.set("FZFG", "Freezing fog");
-    wxCodeKeymap.set("-DZ", "Light drizzle");
-    wxCodeKeymap.set("DZ", "Moderate drizzle");
-    wxCodeKeymap.set("+DZ", "Heavy drizzle");
-    wxCodeKeymap.set("-FZDZ", "Light freezing drizzle");
-    wxCodeKeymap.set("FZDZ", "Moderate freezing drizzle");
-    wxCodeKeymap.set("+FZDZ", "Heavy freezing drizzle");
-    wxCodeKeymap.set("-DZRA", "Light drizzle and rain");
-    wxCodeKeymap.set("DZRA", "Moderate to heavy drizzle and rain");
-    wxCodeKeymap.set("-RA", "Light rain");
-    wxCodeKeymap.set("RA", "Moderate rain");
-    wxCodeKeymap.set("+RA", "Heavy rain");
-    wxCodeKeymap.set("-FZRA", "Light freezing rain");
-    wxCodeKeymap.set("FZRA", "Moderate freezing rain");
-    wxCodeKeymap.set("+FZRA", "Heavy freezing rain");
-    wxCodeKeymap.set("-RASN", "Light rain and snow");
-    wxCodeKeymap.set("RASN", "Moderate rain and snow");
-    wxCodeKeymap.set("+RASN", "Heavy rain and snow");
-    wxCodeKeymap.set("-SN", "Light snow");
-    wxCodeKeymap.set("SN", "Moderate snow");
-    wxCodeKeymap.set("+SN", "Heavy snow");
-    wxCodeKeymap.set("SG", "Snow grains");
-    wxCodeKeymap.set("IC", "Ice crystals");
-    wxCodeKeymap.set("PE PL", "Ice pellets");
-    wxCodeKeymap.set("PE", "Ice pellets");
-    wxCodeKeymap.set("PL", "Ice pellets");
-    wxCodeKeymap.set("-SHRA", "Light rain showers");
-    wxCodeKeymap.set("SHRA", "Moderate rain showers");
-    wxCodeKeymap.set("+SHRA", "Heavy rain showers");
-    wxCodeKeymap.set("-SHRASN", "Light rain and snow showers");
-    wxCodeKeymap.set("SHRASN", "Moderate rain and snow showers");
-    wxCodeKeymap.set("+SHRASN", "Heavy rain and snow showers");
-    wxCodeKeymap.set("-SHSN", "Light snow showers");
-    wxCodeKeymap.set("SHSN", "Moderate snow showers");
-    wxCodeKeymap.set("+SHSN", "Heavy snow showers");
-    wxCodeKeymap.set("-GR", "Light showers with hail, not with thunder");
-    wxCodeKeymap.set("GR", "Moderate to heavy showers with hail, not with thunder");
-    wxCodeKeymap.set("TSRA", "Light to moderate thunderstorm with rain");
-    wxCodeKeymap.set("TSGR", "Light to moderate thunderstorm with hail");
-    wxCodeKeymap.set("+TSRA", "Thunderstorm with heavy rain");
-    wxCodeKeymap.set("UP", "Unknown precipitation");
-    wxCodeKeymap.set("NSW", "No significant weather");
+function loadWeatherCodeKeymap() {
+    weatherCodeKeymap.set("FU", "Smoke");
+    weatherCodeKeymap.set("VA", "Volcanic Ash");
+    weatherCodeKeymap.set("HZ", "Haze");
+    weatherCodeKeymap.set("DU", "Dust");
+    weatherCodeKeymap.set("SA", "Sand");
+    weatherCodeKeymap.set("BLDU", "Blowing dust");
+    weatherCodeKeymap.set("BLSA", "Blowing sand");
+    weatherCodeKeymap.set("PO", "Dust devil");
+    weatherCodeKeymap.set("VCSS", "Vicinity sand storm");
+    weatherCodeKeymap.set("BR", "Mist or light fog");
+    weatherCodeKeymap.set("MIFG", "More or less continuous shallow fog");
+    weatherCodeKeymap.set("VCTS", "Vicinity thunderstorm");
+    weatherCodeKeymap.set("VIRGA", "Virga or precipitation not hitting ground");
+    weatherCodeKeymap.set("VCSH", "Vicinity showers");
+    weatherCodeKeymap.set("TS", "Thunderstorm with or without precipitation");
+    weatherCodeKeymap.set("SQ", "Squalls");
+    weatherCodeKeymap.set("FC", "Funnel cloud or tornado");
+    weatherCodeKeymap.set("SS", "Sand or dust storm");
+    weatherCodeKeymap.set("+SS", "Strong sand or dust storm");
+    weatherCodeKeymap.set("BLSN", "Blowing snow");
+    weatherCodeKeymap.set("DRSN", "Drifting snow");
+    weatherCodeKeymap.set("VCFG", "Vicinity fog");
+    weatherCodeKeymap.set("BCFG", "Patchy fog");
+    weatherCodeKeymap.set("PRFG", "Fog, sky discernable");
+    weatherCodeKeymap.set("FG", "Fog, sky undiscernable");
+    weatherCodeKeymap.set("FZFG", "Freezing fog");
+    weatherCodeKeymap.set("-DZ", "Light drizzle");
+    weatherCodeKeymap.set("DZ", "Moderate drizzle");
+    weatherCodeKeymap.set("+DZ", "Heavy drizzle");
+    weatherCodeKeymap.set("-FZDZ", "Light freezing drizzle");
+    weatherCodeKeymap.set("FZDZ", "Moderate freezing drizzle");
+    weatherCodeKeymap.set("+FZDZ", "Heavy freezing drizzle");
+    weatherCodeKeymap.set("-DZRA", "Light drizzle and rain");
+    weatherCodeKeymap.set("DZRA", "Moderate to heavy drizzle and rain");
+    weatherCodeKeymap.set("-RA", "Light rain");
+    weatherCodeKeymap.set("RA", "Moderate rain");
+    weatherCodeKeymap.set("+RA", "Heavy rain");
+    weatherCodeKeymap.set("-FZRA", "Light freezing rain");
+    weatherCodeKeymap.set("FZRA", "Moderate freezing rain");
+    weatherCodeKeymap.set("+FZRA", "Heavy freezing rain");
+    weatherCodeKeymap.set("-RASN", "Light rain and snow");
+    weatherCodeKeymap.set("RASN", "Moderate rain and snow");
+    weatherCodeKeymap.set("+RASN", "Heavy rain and snow");
+    weatherCodeKeymap.set("-SN", "Light snow");
+    weatherCodeKeymap.set("SN", "Moderate snow");
+    weatherCodeKeymap.set("+SN", "Heavy snow");
+    weatherCodeKeymap.set("SG", "Snow grains");
+    weatherCodeKeymap.set("IC", "Ice crystals");
+    weatherCodeKeymap.set("PE PL", "Ice pellets");
+    weatherCodeKeymap.set("PE", "Ice pellets");
+    weatherCodeKeymap.set("PL", "Ice pellets");
+    weatherCodeKeymap.set("-SHRA", "Light rain showers");
+    weatherCodeKeymap.set("SHRA", "Moderate rain showers");
+    weatherCodeKeymap.set("+SHRA", "Heavy rain showers");
+    weatherCodeKeymap.set("-SHRASN", "Light rain and snow showers");
+    weatherCodeKeymap.set("SHRASN", "Moderate rain and snow showers");
+    weatherCodeKeymap.set("+SHRASN", "Heavy rain and snow showers");
+    weatherCodeKeymap.set("-SHSN", "Light snow showers");
+    weatherCodeKeymap.set("SHSN", "Moderate snow showers");
+    weatherCodeKeymap.set("+SHSN", "Heavy snow showers");
+    weatherCodeKeymap.set("-GR", "Light showers with hail, not with thunder");
+    weatherCodeKeymap.set("GR", "Moderate to heavy showers with hail, not with thunder");
+    weatherCodeKeymap.set("TSRA", "Light to moderate thunderstorm with rain");
+    weatherCodeKeymap.set("TSGR", "Light to moderate thunderstorm with hail");
+    weatherCodeKeymap.set("+TSRA", "Thunderstorm with heavy rain");
+    weatherCodeKeymap.set("UP", "Unknown precipitation");
+    weatherCodeKeymap.set("NSW", "No significant weather");
 }
 
 /**
@@ -1475,11 +1520,45 @@ function loadWxCodeKeymap() {
     
     for (let i = 0; i < vals.length; i++) {
         if (i === 0) {
-            outstr = wxCodeKeymap.get(vals[i]);
+            outstr = weatherCodeKeymap.get(vals[i]);
         }
         else {
-            outstr += ` / ${wxCodeKeymap.get(vals[i])}`;
+            outstr += ` / ${weatherCodeKeymap.get(vals[i])}`;
         }
     }
     return outstr;
+}
+
+/**
+ * Load readable descriptions for Icing codes
+ */
+function loadIcingCodeKeymap() {
+    icingCodeKeymap.set("0", "None");
+    icingCodeKeymap.set("1", "Light");
+    icingCodeKeymap.set("2", "Light in cloud")
+    icingCodeKeymap.set("3", "Light in precip")
+    icingCodeKeymap.set("4", "Moderate");   
+    icingCodeKeymap.set("5", "Moderate in cloud");
+    icingCodeKeymap.set("6", "Moderate in precip");
+    icingCodeKeymap.set("7", "Severe");
+    icingCodeKeymap.set("8", "Severe in cloud");
+    icingCodeKeymap.set("9", "Severe in precip");     
+}
+
+/**
+ * Load readable descriptions for Turbulence codes
+ */
+function loadTurbulenceCodeKeymap() {
+    turbulenceCodeKeymap.set("0", "Light");
+    turbulenceCodeKeymap.set("1", "Light");
+    turbulenceCodeKeymap.set("2", "Moderate clean air occasional")
+    turbulenceCodeKeymap.set("3", "Moderate clean air frequent")
+    turbulenceCodeKeymap.set("4", "Moderate cloud occasional");   
+    turbulenceCodeKeymap.set("5", "Moderate cloud frequent");
+    turbulenceCodeKeymap.set("6", "Severe clean air occasional");
+    turbulenceCodeKeymap.set("7", "Severe clean air frequent");
+    turbulenceCodeKeymap.set("8", "Severe cloud occasional");
+    turbulenceCodeKeymap.set("9", "Severe cloud frequent");
+    turbulenceCodeKeymap.set("X", "Extreme");
+    turbulenceCodeKeymap.set("x", "Extreme");
 }
