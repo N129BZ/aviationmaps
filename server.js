@@ -24,12 +24,14 @@ const xmlParseOptions = {
 };
 const xmlparser = new XMLParser(xmlParseOptions);
 
-const settings = readSettingsFile();
+let settings = {};
+let wss;
+let connection;
 
-function readSettingsFile() {
+(() => {
     let rawdata = fs.readFileSync(`${__dirname}/settings.json`);
-    return JSON.parse(rawdata);
-}
+    settings = JSON.parse(rawdata);
+})();
 
 const DB_PATH        = `${__dirname}/public/data`;
 const DB_SECTIONAL   = `${DB_PATH}/${settings.sectionalDb}`;
@@ -42,13 +44,11 @@ const DB_HISTORY     = `${DB_PATH}/${settings.historyDb}`;
 const DB_AIRPORTS    = `${DB_PATH}/${settings.airportsDb}`;
 const MessageTypes   = settings.messagetypes;
 
-let wss;
-let connection;
 
-
-startWebsocketServer();
-
-function startWebsocketServer() {
+/**
+ * 
+ */
+(() => {
     // http websocket server to forward weather data to page
     let server = http.createServer(function (request, response) { });
     try {
@@ -80,14 +80,14 @@ function startWebsocketServer() {
     catch (error) {
         console.log(error);
     }
-}
+})();
 
 const airpdb = new sqlite3.Database(DB_AIRPORTS, sqlite3.OPEN_READONLY, (err) => {
     if (err) {
         console.log(`Failed to load: ${DB_AIRPORTS}`);
         throw err;
     }
-});   
+});
 
 const vfrdb = new sqlite3.Database(DB_SECTIONAL, sqlite3.OPEN_READONLY, (err) => {
     if (err) {
@@ -140,7 +140,7 @@ const histdb = new sqlite3.Database(DB_HISTORY, sqlite3.OPEN_READWRITE, (err) =>
 function loadAirportsJson() {
     let msgtype = MessageTypes.airports.type;
         
-    sql = `SELECT ident, type, name, elevation_ft, longitude_deg, latitude_deg, iso_region ` + 
+    sql = `SELECT ident, type, name, elevation_ft, longitude_deg, latitude_deg, iso_region, countryname ` + 
             `FROM airports ` +
             `WHERE type NOT IN ('closed') ` +
             `ORDER BY iso_region ASC, name ASC;`;
@@ -159,7 +159,8 @@ function loadAirportsJson() {
                     "elev": row.elevation_ft,
                     "lon": row.longitude_deg,
                     "lat": row.latitude_deg,
-                    "isoregion": row.iso_region
+                    "isoregion": row.iso_region,
+                    "country": row.countryname
                 }
                 jsonout.airports.push(thisrecord);
             });
@@ -437,15 +438,15 @@ function tileToDegree(z, x, y) {
 async function runDownloads() {
     setTimeout(() => { 
         downloadXmlFile(settings.messagetypes.metars); 
-    }, 900);
+    }, 400);
 
     setTimeout(() => { 
         downloadXmlFile(settings.messagetypes.tafs); 
-    }, 1800);
+    }, 800);
 
     setTimeout(() => { 
         downloadXmlFile(settings.messagetypes.pireps); 
-    }, 2700);
+    }, 1200);
 }
 
 async function downloadXmlFile(source) {
@@ -461,14 +462,18 @@ async function downloadXmlFile(source) {
         if (xhr.readyState == 4 && xhr.status == 200) {
             let response = xhr.responseText;
             //fs.writeFileSync(`${DB_PATH}/${source.type}.xml`, response);
-            let parsedmessage = xmlparser.parse(response);
-            let payload = JSON.stringify(parsedmessage);
-            let message = {
-                type: source.type,
-                payload: payload
-            };
-            const json = JSON.stringify(message);
-            connection.send(json);
+            let messageJSON = xmlparser.parse(response);
+            switch(source.type) {
+                case "tafs":
+                    processTafJsonObjects(messageJSON);
+                    break;
+                case "metars":
+                    processMetarJsonObjects(messageJSON);
+                    break;
+                case "pireps":
+                    processPirepJsonObjects(messageJSON);
+                    break;
+            }
         }
     };
     try { 
@@ -477,4 +482,34 @@ async function downloadXmlFile(source) {
     catch (error) {
         console.log(`Error getting message type ${xmlmessage.type}: ${error}`);
     }
+}
+
+async function processTafJsonObjects(tafs) {
+    let payload = JSON.stringify(tafs); 
+    let message = {
+        type: MessageTypes.tafs.type,
+        payload: payload
+    };
+    const json = JSON.stringify(message);
+    connection.send(json);
+}
+
+async function processMetarJsonObjects(metars) {
+    let payload = JSON.stringify(metars);
+    let message = {
+        type: MessageTypes.metars.type,
+        payload: payload
+    };
+    const json = JSON.stringify(message);
+    connection.send(json);
+}
+
+async function processPirepJsonObjects(pireps) {
+    let payload = JSON.stringify(pireps);
+    let message = {
+        type: MessageTypes.pireps.type,
+        payload: payload
+    }
+    const json = JSON.stringify(message);
+    connection.send(json);
 }

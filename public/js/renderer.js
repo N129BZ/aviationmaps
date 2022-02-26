@@ -41,15 +41,17 @@ let lastcriteria = "allregions";
 let airportNameKeymap = new Map();
 let tafFieldKeymap = new Map();
 let metarFieldKeymap = new Map();
-let weatherCodeKeymap = new Map();
+let weatherAcronymKeymap = new Map();
 let icingCodeKeymap = new Map();
 let turbulenceCodeKeymap = new Map();
+let skyConditionKeymap = new Map();
 
 loadTafFieldKeymap();
 loadMetarFieldKeymap();
-loadWeatherCodeKeymap();
+loadWeatherAcronymKeymap();
 loadTurbulenceCodeKeymap();
 loadIcingCodeKeymap();
+loadSkyConditionmKeymap();
 
 /**
  * ol.Collections hold features like
@@ -58,6 +60,7 @@ loadIcingCodeKeymap();
 let metarFeatures = new ol.Collection();
 let airportFeatures = new ol.Collection();
 let tafFeatures = new ol.Collection();
+let pirepFeatures = new ol.Collection();
 
 /**
  * Vector sources
@@ -65,6 +68,7 @@ let tafFeatures = new ol.Collection();
 let metarVectorSource;
 let airportVectorSource;
 let tafVectorSource;
+let pirepVectorSource;
 let ownshipVectorSource;
 let animatedWxTileSource;
 
@@ -74,6 +78,7 @@ let animatedWxTileSource;
 let airportVectorLayer;
 let metarVectorLayer;
 let tafVectorLayer;
+let pirepVectorLayer;
 
 /**
  * Tile layers
@@ -175,7 +180,7 @@ let regionmap = new Map();
             let payload = JSON.parse(message.payload); 
             switch (message.type) {
                 case MessageTypes.airports.type:
-                    loadAirportsCollection(payload);
+                    processAirports(payload);
                     break;
                 case MessageTypes.metars.type:
                     processMetars(payload);
@@ -184,7 +189,7 @@ let regionmap = new Map();
                     processTafs(payload);
                     break;
                 case MessageTypes.pireps.type:
-                    //console.log(message.payload);
+                    processPireps(payload);
                     break;
             }
         }
@@ -211,27 +216,9 @@ let regionmap = new Map();
 });
 
 /**
- * Icon markers for different weather/airport categories 
+ * Icon markers for different METAR categories 
  */
- let mvfrMarker = new ol.style.Icon({
-    crossOrigin: 'anonymous',
-    src: `${URL_SERVER}/img/mvfr.png`,
-    size: [55, 55],
-    offset: [0, 0],
-    opacity: 1,
-    scale: .30
-});
-/*--------------------------------------*/
-let vfrMarker = new ol.style.Icon({
-    crossOrigin: 'anonymous',
-    src: `${URL_SERVER}/img/vfr.png`,
-    size: [55, 55],
-    offset: [0, 0],
-    opacity: 1,
-    scale: .30
-});
-/*--------------------------------------*/
-let ifrMarker = new ol.style.Icon({
+ let ifrMarker = new ol.style.Icon({
     crossOrigin: 'anonymous',
     src: `${URL_SERVER}/img/ifr.png`,
     size: [55, 55],
@@ -249,6 +236,66 @@ let lifrMarker = new ol.style.Icon({
     scale: .30
 });
 /*--------------------------------------*/
+let mvfrMarker = new ol.style.Icon({
+    crossOrigin: 'anonymous',
+    src: `${URL_SERVER}/img/mvfr.png`,
+    size: [55, 55],
+    offset: [0, 0],
+    opacity: 1,
+    scale: .30
+});
+/*--------------------------------------*/
+let vfrMarker = new ol.style.Icon({
+    crossOrigin: 'anonymous',
+    src: `${URL_SERVER}/img/vfr.png`,
+    size: [55, 55],
+    offset: [0, 0],
+    opacity: 1,
+    scale: .30
+});
+
+/**
+ * Icon markers for different PIREP weather categories
+ */
+let ifrPirep = new ol.style.Icon({
+    crossOrigin: 'anonymous',
+    src: `${URL_SERVER}/img/ifrpirep.png`,
+    size: [85, 85],
+    offset: [0, 0],
+    opacity: 1,
+    scale: .50
+});
+/*--------------------------------------*/
+let lifrPirep = new ol.style.Icon({
+    crossOrigin: 'anonymous',
+    src: `${URL_SERVER}/img/lifrpirep.png`,
+    size: [85, 85],
+    offset: [0, 0],
+    opacity: 1,
+    scale: .50
+});
+/*--------------------------------------*/
+let mvfrPirep = new ol.style.Icon({
+    crossOrigin: 'anonymous',
+    src: `${URL_SERVER}/img/mvfrpirep.png`,
+    size: [85, 85],
+    offset: [0, 0],
+    opacity: 1,
+    scale: .50
+});
+/*--------------------------------------*/
+let vfrPirep = new ol.style.Icon({
+    crossOrigin: 'anonymous',
+    src: `${URL_SERVER}/img/vfrpirep.png`,
+    size: [85, 85],
+    offset: [0, 0],
+    opacity: 1,
+    scale: .50
+});
+
+/**
+ * Icon markers for airports, TAFs, heliports, etc.
+ */
 let tafMarker = new ol.style.Icon({
     crossOrigin: 'anonymous',
     src: `${URL_SERVER}/img/taf.png`,
@@ -272,6 +319,15 @@ let heliportMarker = new ol.style.Icon({
     src: `${URL_SERVER}/img/helipad.png`,
     size: [55, 55],
     offset: [0, 0],
+    opacity: 1,
+    scale: .50
+});
+/*--------------------------------------*/
+let pirepMarker = new ol.style.Icon({
+    crossOrigin: 'anonymous',
+    src: `${URL_SERVER}/img/pirep.png`,
+    size:[85, 85],
+    offset: [0,0],
     opacity: 1,
     scale: .50
 });
@@ -300,6 +356,9 @@ const airportStyle = new ol.style.Style({
 const heliportStyle = new ol.style.Style({
     image: heliportMarker
 });
+const pirepStyle = new ol.style.Style({
+    image: pirepMarker
+});
 
 /**
  * Async $get for list of airports
@@ -315,9 +374,9 @@ $.get({
 
 /**
  * Load airports into their feature collection 
- * @param {*} jsonobj: JSON object 
+ * @param {jsonobj} airport JSON object 
  */
-function loadAirportsCollection(jsonobj) {
+function processAirports(jsonobj) {
     let usastates = new Map();
     let isoregions = new Map();
     try {
@@ -326,16 +385,18 @@ function loadAirportsCollection(jsonobj) {
             let lon = airport.lon;
             let lat = airport.lat;
             let isoregion = airport.isoregion;
+            let country = airport.country;
             if (isoregion.search("US-") > -1) { 
-                usastates.set(isoregion, isoregion);
+                usastates.set(country, country);
             } 
             else {
-                isoregions.set(isoregion, isoregion);
+                isoregions.set(country, country);
             }
             let airportmarker = new ol.Feature({
                 ident: airport.ident,
                 type: airport.type,
                 isoregion: isoregion,
+                country: country,
                 geometry: new ol.geom.Point(ol.proj.fromLonLat([lon, lat]))
             });
             airportmarker.setId(airport.ident);
@@ -355,23 +416,23 @@ function loadAirportsCollection(jsonobj) {
          * we want US states to be at the top of the list followed
          * by the rest of the isoregions 
          */
-        //usastates[Symbol.iterator] = function* () {
-        //    yield* [...this.entries()].sort((a, b) => a[1] - b[1]);
-        //}
-        usastates.forEach((isoregion) => {
+        usastates[Symbol.iterator] = function* () {
+            yield* [...this.entries()].sort((a, b) => a[1] - b[1]);
+        }
+        usastates.forEach((country, isoregion) => {
             let option = document.createElement("option");
             option.value = isoregion;
-            option.text = isoregion;
+            option.text = country;
             regionselect.appendChild(option);
         });
         
-        //regionmap[Symbol.iterator] = function* () {
-        //    yield* [...this.entries()].sort((a, b) => a[1] - b[1]);
-        //}
-        isoregions.forEach((isoregion) => { 
+        regionmap[Symbol.iterator] = function* () {
+            yield* [...this.entries()].sort((a, b) => a[1] - b[1]);
+        }
+        isoregions.forEach((country, isoregion) => { 
             let option = document.createElement("option");
             option.value = isoregion;
-            option.text = isoregion;
+            option.text = country;
             regionselect.appendChild(option);
         });
     }
@@ -395,7 +456,7 @@ regionselect.addEventListener('change', (event) => {
 function selectFeaturesByCriteria() {
     airportFeatures.forEach((feature) => {
         let type = feature.get("type");
-        let isoregion = feature.get("isoregion");
+        let country = feature.get("country");
         if (type === "heliport") {
             feature.setStyle(heliportStyle);
         }
@@ -408,7 +469,7 @@ function selectFeaturesByCriteria() {
                 feature.setStyle(new ol.style.Style(undefined));
             }
         }
-        else if (isoregion !== lastcriteria && lastcriteria !== "allregions") {
+        else if (country !== lastcriteria && lastcriteria !== "allregions") {
             feature.setStyle(new ol.style.Style(undefined));        
         }
     });
@@ -551,6 +612,9 @@ map.on('click', (evt) => {
             else if (datatype === "taf"){
                 createTafPopup(feature);
             }
+            else if (datatype === "pirep") {
+                createPirepPopup(feature);
+            }
             else { // simple airport marker
                 createAirportPopup(feature);
             }
@@ -588,8 +652,9 @@ function createMetarPopup(feature) {
     let altim = getAltimeterSetting(thismetar.altim_in_hg);
     let vis = getDistanceUnits(thismetar.visibility_statute_mi);
     let wxcode = thismetar.wx_string !== undefined ? decodeWxDescriptions(thismetar.wx_string) : "";
-    let skyconditions = decodeSkyCondition(thismetar.sky_condition);
-    let icingconditions = decodeIcingOrTurbulenceCondition(thismetar.icing_condition);
+    let taflabelcssClass = "taflabel"
+    let skyconditions = decodeSkyCondition(thismetar.sky_condition, taflabelcssClass);
+    let icingconditions = decodeIcingOrTurbulenceCondition(thismetar.icing_condition, taflabelCssClass);
 
     let label = `<label class="#class">`;
     let css;
@@ -608,17 +673,9 @@ function createMetarPopup(feature) {
             break;
     }
     if (ident != "undefined") {
-        let name = ""
-        try {
-            name = airportNameKeymap.get(ident) + ", ";
-        }
-        catch(error) {
-            console.log("Airport name NOT FOUND!");
-        }
-        name = name.replace("/", "\n");
-        name = name.replace(",", "\n");
+        let name = getFormattedAirportName(ident);
         let html = `<div id="#featurepopup"><pre><code><p>`
-        html +=    `${css}&nbsp&nbsp${name}${ident} - ${cat}&nbsp&nbsp</label><p></p>`;
+        html +=    `${css}${name}\n${ident} - ${cat}</label><p></p>`;
         html +=   (time != "" && time != "undefined") ? `Time:&nbsp<b>${time}</b><br/>` : "";
         html +=   (temp != "" && temp != "undefined") ? `Temp:&nbsp<b>${tempC} °C</b> (${temp})<br/>` : "";
         html +=   (dewp != "" && dewp != "undefined") ?`Dewpoint:&nbsp<b>${dewpC} °C</b> (${dewp})<br/>` : "";
@@ -626,12 +683,13 @@ function createMetarPopup(feature) {
         html += (winspd != "" && winspd != "undefined") ? `Wind Speed:&nbsp<b>${winspd}&nbspkt</b><br/>` : "";
         html += (wingst != "" && wingst != "undefined") ? `Wind Gust:&nbsp<b>${wingst}&nbspkt</b><br/>` : "";
         html +=  (altim != "" && altim != "undefined") ? `Altimeter:&nbsp<b>${altim}&nbsphg</b><br/>` : "";
-        html +=    (vis != "" && vis != "undefined") ? `Visibility:&nbsp<b>${vis}</b><br/>` : "";
+        html +=    (vis != "" && vis != "undefined") ? `Horizontal Visibility:&nbsp<b>${vis}</b><br/>` : "";
         html += (wxcode != "" && wxcode != "undefined") ? `Weather:&nbsp<b>${wxcode}</b><br/>`: "";
         html += (skyconditions != "" && skyconditions != "undefined") ? `${skyconditions}` : "";
         html += `</p></code></pre><br /></div>`;
         popupcloser.style.left = "30px";
         popupcloser.style.top = "88%";
+        popupcontent.style.padding = "0px";
         popupcontent.innerHTML = html;  
     }
 }
@@ -664,7 +722,7 @@ function createTafPopup(feature) {
         let from_to = `<label class="tafsubheader">`;
         Object.keys(forecastvalue).forEach((forecastkey) => {
             let subobj = forecastvalue[forecastkey];
-            let fieldname = tafFieldKeymap.get(forecastkey);
+            let fieldname = getTafFieldDescription(forecastkey);
             switch (forecastkey) {
                 case "fcst_time_from":
                     from_to += `<b>${subobj}</b>`;
@@ -673,7 +731,6 @@ function createTafPopup(feature) {
                     from_to += `&nbsp&nbspto&nbsp&nbsp<b>${subobj}</b></label><br />`
                     html += `<label class="fcstlabel">${from_to}</label><br />`;
                     break;
-                case "change_indicator":
                 case "temp_c":
                 case "dewpoint_c":
                 case "time_becoming":
@@ -682,21 +739,9 @@ function createTafPopup(feature) {
                 case "wind_gust_kt":
                 case "wind_shear_hgt_ft_agl":
                 case "wind_shear_speed_kt":
-                case "altim_in_hg":
                 case "vert_vis_ft":
-                case "wx_string":
-                    if (forecastkey === "wx_string") {
-                        let lineval = decodeWxDescriptions(subobj);
-                        html += `<label class="tafwxlabel">${fieldname}: <b>${lineval}</b></label><br />`;
-                    }
-                    else {
-                        html += `<label class="taflabel">${fieldname}: <b>${subobj}</b></label><br />`;
-                    }
-                    break;
-                case "wind_shear_dir_degrees":
-                case "wind_dir_degrees":
-                    html += `<label class="taflabel">${fieldname}: <b>${subobj}°</b></label><br />`;
-                    break;
+                case "visibility_statute_mi":
+                    html += `<label class="taflabel">${fieldname}: <b>${subobj}</b></label><br />`;
                 case "sky_condition":
                     html += `<label class="tafskyheader">${fieldname}</label><br />`;
                     html += decodeSkyCondition(subobj);
@@ -708,15 +753,125 @@ function createTafPopup(feature) {
                     break;
                 case "temperature":
                     break;
-
+                case "altim_in_hg":
+                    let altimvalue = getInchesOfMercury(subobj);
+                    html += `<label class="taflabel">${fieldname}: <b>${altimvalue}</b></label><br />`;
+                    break;
+                case "wx_string":
+                    let lineval = decodeWxDescriptions(subobj);
+                    html += `<label class="tafwxlabel">${fieldname}: <b>${lineval}</b></label><br />`;
+                    break;
+                case "change_indicator":
+                    let change = getSkyConditionDescription(subobj);
+                    html += `<label class="taflabel">${fieldname}: <b>${change}</b></label><br />`;
+                    break;
+                case "wind_shear_dir_degrees":
+                case "wind_dir_degrees":
+                    html += `<label class="taflabel">${fieldname}: <b>${subobj}°</b></label><br />`;
+                    break;
+                default:
+                    console.log(`forecastkey: ${forecastkey} NOT FOUND!`);
+                    break;
             }
         });
         html += "</p><hr>";
     });
     html += "</div>";
     html = outerhtml.replace("###", html);
-    popupcloser.style.left = "30px";
-    popupcloser.style.top = "94%";
+    popupcloser.style.left = "28px";
+    popupcloser.style.top = "93%";
+    popupcontent.style.padding = "0px";
+    popupcontent.innerHTML = html;
+}
+
+/**
+ * Create the html for a PIREP popup element
+ * @param {object} feature: the pirep the user clicked on
+ */
+ function createPirepPopup(feature) {
+    let thispirep = feature.get("pirep");
+    let outerhtml = `<div class="taftitle">` + 
+                        `<label class="taftitlelabel">${thispirep.pirep_type} FROM AIRCRAFT: ${thispirep.aircraft_ref}</label><p></p>` +
+                    `</div>` +
+                    `<div class="taf">` + 
+                        `<pre><code>` +
+                        `<table class="tafmessage" id="taftable">` +
+                            `<tr class="tafbody">` + 
+                                `<td id="tafdata">###</td>` +
+                            `</tr>` +
+                        `</table>` +
+                        `</code></pre>` +                 
+                    `</div>` + 
+                    `<br /><br />`;
+    let html = "<div>";
+
+    let pireplabel = `<label class="pirepitem">`
+
+    Object.keys(thispirep).forEach((pirepkey) => {
+        let pirepvalue = thispirep[pirepkey];
+        let fieldname = getTafFieldDescription(pirepkey);
+        switch (pirepkey) {
+            case "receipt_time":
+                html += `${pireplabel}${fieldname}: <b>${pirepvalue}</b></label><br />`;
+                break;
+            case "observation_time":
+                html += `${pireplabel}${fieldname}: <b>${pirepvalue}</b></label><br />`
+                break;
+            case "latitude":
+            case "longitude":
+            case "altitude_ft_msl":
+            case "temp_c":
+            case "dewpoint_c":
+            case "time_becoming":
+            case "probability":
+            case "wind_speed_kt":
+            case "wind_gust_kt":
+            case "wind_shear_hgt_ft_agl":
+            case "wind_shear_speed_kt":
+            case "vert_vis_ft":
+            case "visibility_statute_mi":
+                html += `<label class="pirepitem">${fieldname}: <b>${pirepvalue}</b></label><br />`;
+                break;
+            case "wind_shear_dir_degrees":
+            case "wind_dir_degrees":
+                html += `${pireplabel}${fieldname}: <b>${pirepvalue}°</b></label><br />`;
+                break;
+            case "sky_condition":
+                html += `<label class="pirepskyheader">${fieldname}</label><br />`;
+                html += decodeSkyCondition(pirepvalue, "pirepitem");
+                break;
+            case "turbulence_condition":
+            case "icing_condition":
+                html += `<label class="pirepskyheader">${fieldname}</label><br />`;
+                html += decodeIcingOrTurbulenceCondition(pirepvalue, "pirepitem");
+                break;
+            case "temperature":
+                break;
+            case "altim_in_hg":
+                let altimvalue = getInchesOfMercury(pirepvalue);
+                html += `<label class="pirepitem">${fieldname}: <b>${altimvalue}</b></label><br />`;
+                break;
+            case "wx_string":
+                let lineval = decodeWxDescriptions(pirepvalue);
+                html += `<label class="pirepitem">${fieldname}: <b>${lineval}</b></label><br />`;
+                break;
+            case "change_indicator":
+                let change = getSkyConditionDescription(pirepvalue);
+                html += `<label class="pirepitem">${fieldname}: <b>${change}</b></label><br />`;
+                break;
+            case "pirep_type":
+            case "aircraft_ref":
+                break;
+            default:
+                console.log(`${pirepkey} NOT FOUND!`);
+                break;
+        }
+    });
+    html += "</p><hr></div>";
+    html = outerhtml.replace("###", html);
+    popupcloser.style.left = "28px";
+    popupcloser.style.top = "93%";
+    popupcontent.style.padding = "0px";
     popupcontent.innerHTML = html;
 }
 
@@ -725,7 +880,7 @@ function createTafPopup(feature) {
  * @param {json object} skyobject 
  * @returns html string 
  */
-function decodeSkyCondition(skyobject) {
+function decodeSkyCondition(skyobject, labelclassCss) {
     let html = "";
     if (skyobject !== undefined) {
         let skyvalues = Object.values(skyobject);
@@ -735,23 +890,20 @@ function decodeSkyCondition(skyobject) {
             Object.values(skyobject).forEach((condition) => {
                 let cleankey = "";
                 let sublabel = "";
+                let keyvalue = "";
                 if (typeof(condition) !== "string") {
                     Object.keys(condition).forEach((conditionkey) => {
-                        cleankey = metarFieldKeymap.get(conditionkey);
-                        if (cleankey === undefined || cleankey === "") {
-                            cleankey = replaceAll(conditionkey, "_", " ");
-                        }
-                        sublabel = `<label class="taflabel">${cleankey}: <b>${condition[conditionkey]}</b></label><br />`;
+                        cleankey = getTafFieldDescription(conditionkey);
+                        keyvalue = getSkyConditionDescription(condition[conditionkey]);
+                        sublabel = `<label class="${labelclassCss}">${cleankey}: <b>${keyvalue}</b></label><br />`;
                         html += sublabel;
                     });
                 }
                 else {
                     keycount ++;
-                    cleankey = metarFieldKeymap.get(skykeys[keycount]);
-                    if (cleankey === undefined || cleankey === "") {
-                        cleankey = replaceAll(skykeys[keycount], "_", " ");
-                    }
-                    sublabel = `<label class="taflabel">${cleankey}: <b>${skyvalues[keycount]}</b></label><br />`;
+                    cleankey = getTafFieldDescription(skykeys[keycount]);
+                    keyvalue = getSkyConditionDescription(skyvalues[keycount]);
+                    sublabel = `<label class="${labelclassCss}">${cleankey}: <b>${keyvalue}</b></label><br />`;
                     html += sublabel;
                 }
             });
@@ -764,11 +916,22 @@ function decodeSkyCondition(skyobject) {
 }
 
 /**
+ * Get inches of mercury fixed at 2 decimal places
+ * @param {float} altimeter 
+ * @returns 
+ */
+function getInchesOfMercury(altimeter) {
+    let inhg = parseFloat(altimeter);
+    return inhg.toFixed(2);
+}
+
+/**
  * Decode icing or turbulence condition
  * @param {json object} conditionobject 
+ * @param {string} CSS class to use for the line items
  * @returns html string
  */
-function decodeIcingOrTurbulenceCondition(conditionobject) {
+function decodeIcingOrTurbulenceCondition(conditionobject, labelclassCss) {
     let html = "";
     if (conditionobject != undefined) {
         try {
@@ -781,7 +944,7 @@ function decodeIcingOrTurbulenceCondition(conditionobject) {
                 // the first condition is the code, followed by min alt, then max alt
                 let conditionkey = conditionkeys[index];
                 if (index === 0) {
-                    turbulence = turbulenceCodeKeymap.get(condition);
+                    turbulence = getTurbulenceCodeDescription(condition);
                 }
                 else { 
                     turbulence = condition;
@@ -789,8 +952,8 @@ function decodeIcingOrTurbulenceCondition(conditionobject) {
                         index = -1; 
                     }
                 }
-                let fieldlabel = conditionkey.replaceAll("_", " ");
-                let label = `<label class="taflabel">${fieldlabel}: <b>${turbulence}</b></label><br />`;
+                let fieldlabel = getTafFieldDescription(conditionkey);
+                let label = `<label class="${labelclassCss}">${fieldlabel}: <b>${turbulence}</b></label><br />`;
                 html += label;
             });
         }
@@ -807,30 +970,20 @@ function decodeIcingOrTurbulenceCondition(conditionobject) {
  */
 function createAirportPopup(feature) {
     let ident = feature.get("ident");
-    let name = ""
-    try {
-        name = airportNameKeymap.get(ident);
-        if (name.length > 0) {
-            name = name.replace("/", "\n");
-            name = name.replace(",", "\n");
-        }
-    }
-    catch(error) {
-        console.log("Airport name NOT FOUND!");
-    }
+    let name = getFormattedAirportName(ident)
     let html = `<div id="#featurepopup"><pre><code><p>`;
         html += `<label class="airportpopuplabel">${name} - ${ident}</label><p></p>`;
         html += `</p></code></pre></div>`;
         
         popupcloser.style.left = "27px";
         popupcloser.style.top = "76%";
-        popupcontent.style.padding = "25px";
+        popupcontent.style.padding = "15px";
         popupcontent.innerHTML = html;  
 }
 
 /**
  * 
- * @param {*} metarsobject: JSON object with LOTS of metars
+ * @param {object} metarsobject: JSON object with LOTS of metars
  */
 function processMetars(metarsobject) {
     let newmetars = metarsobject.response.data.METAR;
@@ -878,7 +1031,7 @@ function processMetars(metarsobject) {
 
 /**
  * 
- * @param {*} tafsobject: JSON object with LOTS of tafs 
+ * @param {object} tafsobject: JSON object with LOTS of tafs 
  */
 function processTafs(tafsobject) {
     let newtafs = tafsobject.response.data.TAF;
@@ -889,7 +1042,7 @@ function processTafs(tafsobject) {
                 /**
                  * Add this taf to the fafs feature collection
                  */
-                 let taffeature = new ol.Feature({
+                let taffeature = new ol.Feature({
                     ident: taf.station_id,
                     taf: taf,
                     datatype: "taf",
@@ -898,6 +1051,50 @@ function processTafs(tafsobject) {
                 taffeature.setId(taf.station_id);
                 taffeature.setStyle(tafStyle);
                 tafFeatures.push(taffeature);
+            });
+        }
+        catch (error){
+            console.log(error.message);
+        }
+    }
+}
+
+/**
+ * 
+ * @param {object} pirepsobject: JSON object with LOTS of pireps 
+ */
+ function processPireps(pirepsobject) {
+    let newpireps = pirepsobject.response.data.PIREP;
+    if (newpireps !== undefined) {
+        pirepFeatures.clear();
+        try {
+            newpireps.forEach((pirep) => {
+                let pseudoheading = Math.random()*Math.PI*2;
+                
+                /**
+                 * Add this pirep to the pireps feature collection
+                 */
+                let pirepfeature = new ol.Feature({
+                    ident: pirep.aircraft_ref,
+                    pirep: pirep,
+                    datatype: "pirep",
+                    geometry: new ol.geom.Point(ol.proj.fromLonLat([pirep.longitude, pirep.latitude])),
+                });
+                
+                pirepfeature.setId(pirep.aircraft_ref);
+                pirepfeature.setStyle(new ol.style.Style({
+                                        image: new ol.style.Icon({
+                                            crossOrigin: 'anonymous',
+                                            src: `${URL_SERVER}/img/pirep.png`,
+                                            size:[85, 85],
+                                            offset: [0,0],
+                                            opacity: 1,
+                                            scale: .50,
+                                            rotation: pseudoheading
+                                        })
+                                    })
+                );
+                pirepFeatures.push(pirepfeature);
             });
         }
         catch (error){
@@ -1054,7 +1251,7 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
         source: metarVectorSource,
         visible: false,
         extent: extent,
-        zIndex: 11
+        zIndex: 12
     }); 
 
     airportVectorSource = new ol.source.Vector({
@@ -1076,13 +1273,24 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
         source: tafVectorSource,
         visible: false,
         extent: extent,
-        zIndex: 12
+        zIndex: 13
     });
     
+    pirepVectorSource = new ol.source.Vector({
+        features: pirepFeatures
+    });
+    pirepVectorLayer = new ol.layer.Vector({
+        title: "Pireps",
+        source: pirepVectorSource,
+        visible: false,
+        extent: extent, zIndex: 14
+    });
+
     map.addLayer(debugTileLayer);
     map.addLayer(airportVectorLayer);
     map.addLayer(metarVectorLayer); 
     map.addLayer(tafVectorLayer);
+    map.addLayer(pirepVectorLayer);
     map.addLayer(animatedWxTileLayer);
     map.addLayer(caribbeanTileLayer);
     map.addLayer(grandcanyonAoTileLayer);
@@ -1403,33 +1611,102 @@ function getAltimeterSetting(altimeter) {
 }
 
 /**
- * Load taf normalized field names
+ * Get the formatted name of an airport
+ * @param {string} ident, the airport identifier 
+ * @returns string, formatted name of the airport
+ */
+ function getFormattedAirportName(ident) {
+    let retvalue = airportNameKeymap.get(ident);
+    if (retvalue === undefined || 
+        retvalue === "undefined" ||
+        retvalue === "") {
+        retvalue = "";
+    } 
+    else {
+        retvalue = retvalue.replace("/", "\n");
+        retvalue = retvalue.replace(",", "\n");
+    }
+    return retvalue;
+}
+
+/**
+ * Get the description for a TAF fieldname abbreviation
+ * @param {string} fieldname 
+ * @returns string, readable description of fieldname 
+ */
+ function getTafFieldDescription(fieldname) {
+    let retvalue = fieldname;
+    if (!Number.isInteger(fieldname)) {
+        retvalue = tafFieldKeymap.get(fieldname);
+        if (retvalue === undefined) {
+            retvalue = fieldname;
+        }
+    }
+    return retvalue;
+}
+
+/**
+ * Load normalized TAF field names
  */
 function loadTafFieldKeymap() {
+    tafFieldKeymap.set("turbulence_freq", "Frequency");
+    tafFieldKeymap.set("turbulence_type", "Type");
+    tafFieldKeymap.set("turbulence_top_ft_msl", "Top in feet MSL");
+    tafFieldKeymap.set("turbulence_base_ft_msl", "Base in feet MSL");
+    tafFieldKeymap.set("temp_c", "Temperature °C");
+    tafFieldKeymap.set("icing_type", "Icing type");
+    tafFieldKeymap.set("pirep_type", "Pirep type");
+    tafFieldKeymap.set("altitude_ft_msl", "Altitude in feet MSL");
+    tafFieldKeymap.set("receipt_time", "Receipt time")
+    tafFieldKeymap.set("observation_time", "Observation time")
+    tafFieldKeymap.set("latitude", "Latitude")
+    tafFieldKeymap.set("longitude", "Longitude")
+    tafFieldKeymap.set("cloud_type", "Cloud type");
     tafFieldKeymap.set("fcst_time_from", "Time from");
     tafFieldKeymap.set("fcst_time_to", "Time to");
     tafFieldKeymap.set("change_indicator", "Change indicator");
     tafFieldKeymap.set("time_becoming", "Time becoming");
     tafFieldKeymap.set("probability", "Probability");
     tafFieldKeymap.set("wind_dir_degrees", "Wind Direction");
-    tafFieldKeymap.set("wind_speed_kt", "Wind Speed kt");
-    tafFieldKeymap.set("wind_gust_kt", "Wind Gust kt");
-    tafFieldKeymap.set("wind_shear_hgt_ft_agl", "Shear height ft agl");
+    tafFieldKeymap.set("wind_speed_kt", "Wind Speed knots");
+    tafFieldKeymap.set("wind_gust_kt", "Wind Gust knots");
+    tafFieldKeymap.set("wind_shear_hgt_ft_agl", "Shear height feet AGL");
     tafFieldKeymap.set("wind_shear_dir_degrees", "Shear direction");
-    tafFieldKeymap.set("wind_shear_speed_kt", "Shear speed kt");
+    tafFieldKeymap.set("wind_shear_speed_kt", "Shear speed knots");
     tafFieldKeymap.set("altim_in_hg", "Altimeter (Hg)");
-    tafFieldKeymap.set("vert_vis_ft", "Vertical vis. ft");
+    tafFieldKeymap.set("vert_vis_ft", "Vertical visibility in feet");
+    tafFieldKeymap.set("visibility_statute_mi", "Horizontal visibility in statute miles");
     tafFieldKeymap.set("wx_string", "Weather");
     tafFieldKeymap.set("sky_condition", "Sky condition");
     tafFieldKeymap.set("icing_condition", "Icing condition");
     tafFieldKeymap.set("turbulence_condition", "Turbulence condition");
     tafFieldKeymap.set("sky_cover", "Sky cover");
-    tafFieldKeymap.set("cloud_base_ft_agl", "Cloud base ft AGL");
+    tafFieldKeymap.set("cloud_base_ft_agl", "Cloud base feet AGL");
     tafFieldKeymap.set("cloud_base", "Cloud base");
+    // icing fieldnames
+    tafFieldKeymap.set("icing_intensity", "Intensity");
+    tafFieldKeymap.set("icing_min_alt_ft_agl", "Min altitude feet AGL");
+    tafFieldKeymap.set("icing_max_alt_ft_agl", "Max altitude feet AGL");
+    // turbulence fieldnames
+    tafFieldKeymap.set("turbulence_intensity", "Intensity");
+    tafFieldKeymap.set("turbulence_min_alt_ft_agl", "Min altitude feet AGL");
+    tafFieldKeymap.set("turbulence_max_alt_ft_agl", "Max altitude feet AGL");
 }
 
 /**
- * Load metar normalized field names
+ * Get the description for a TAF/Metar fieldname abbreviation
+ * @param {string} fieldname 
+ * @returns string, readable description of fieldname 
+ */
+ function getMetarFieldDescription(fieldname) {
+    let retvalue = metarFieldKeymap.get(fieldname);
+    if (retvalue === undefined || retvalue === "") {
+        retvalue = replaceAll(fieldname, "_", " ");
+    }
+    return retvalue;
+}
+/**
+ * Load normalized metar field names
  */
  function loadMetarFieldKeymap() {
     metarFieldKeymap.set("raw_text", "raw text");
@@ -1440,104 +1717,298 @@ function loadTafFieldKeymap() {
     metarFieldKeymap.set("temp_c", "Temp °C");
     metarFieldKeymap.set("dewpoint_c", "Dewpoint °C");
     metarFieldKeymap.set("wind_dir_degrees", "Wind direction"); 
-    metarFieldKeymap.set("wind_speed_kt", "Wind speed kt");
-    metarFieldKeymap.set("wind_gust_kt", "Wind gust kt");
-    metarFieldKeymap.set("visibility_statute_mi", "Horiz. vis. statute mi.");
-    metarFieldKeymap.set("altim_in_hg", "Altimeter Hg");
-    metarFieldKeymap.set("sea_level_pressure_mb", "Sea-level press. Mb");
+    metarFieldKeymap.set("wind_speed_kt", "Wind speed knots");
+    metarFieldKeymap.set("wind_gust_kt", "Wind gust knots");
+    metarFieldKeymap.set("visibility_statute_mi", "Horizontal visibility in statute miles");
+    metarFieldKeymap.set("altim_in_hg", "Altimeter in Hg");
+    metarFieldKeymap.set("sea_level_pressure_mb", "Sea-level pressure in MB");
     metarFieldKeymap.set("quality_control_flags", "Quality control flags");
     metarFieldKeymap.set("wx_string", "Weather");
     metarFieldKeymap.set("sky_condition", "Sky cover");
     metarFieldKeymap.set("sky_cover", "Sky cover");
-    metarFieldKeymap.set("cloud_base_ft_agl", "Cloud base ft AGL");
+    metarFieldKeymap.set("cloud_base_ft_agl", "Cloud base feet AGL");
     metarFieldKeymap.set("cloud_base", "Cloud base");
     metarFieldKeymap.set("flight_category", "Flight category");
-    metarFieldKeymap.set("three_hr_pressure_tendency_mb", "Press. change past 3 hrs.");
-    metarFieldKeymap.set("maxT_c", "Max air temp °C, past 6 hrs");
-    metarFieldKeymap.set("minT_c", "Min air temp °C, past 6 hrs");
-    metarFieldKeymap.set("maxT24hr_c", "Max air temp °C, past 24 hrs");
-    metarFieldKeymap.set("minT24hr_c", "Min air temp °C, past 24 hrs");
-    metarFieldKeymap.set("precip_in", "Liquid precip since last METAR");
-    metarFieldKeymap.set("pcp3hr_in", "Liquid precip past 3 hrs");
-    metarFieldKeymap.set("pcp6hr_in", "Liquid precip past 6 hrs");
-    metarFieldKeymap.set("pcp24hr_in", "Liquid precip past 24 hrs");
-    metarFieldKeymap.set("snow_in", "Snow (inches)");
-    metarFieldKeymap.set("vert_vis_ft", "Vertical vis. (feet)");
+    metarFieldKeymap.set("three_hr_pressure_tendency_mb", "Pressure change past 3 hours in MB");
+    metarFieldKeymap.set("maxT_c", "Max air temp °C, past 6 hours");
+    metarFieldKeymap.set("minT_c", "Min air temp °C, past 6 hours");
+    metarFieldKeymap.set("maxT24hr_c", "Max air temp °C, past 24 hours");
+    metarFieldKeymap.set("minT24hr_c", "Min air temp °C, past 24 hours");
+    metarFieldKeymap.set("precip_in", "Liquid precipitation since last METAR");
+    metarFieldKeymap.set("pcp3hr_in", "Liquid precipitation past 3 hours");
+    metarFieldKeymap.set("pcp6hr_in", "Liquid precipitation past 6 hours");
+    metarFieldKeymap.set("pcp24hr_in", "Liquid precipitation past 24 hours");
+    metarFieldKeymap.set("snow_in", "Snow depth in inches");
+    metarFieldKeymap.set("vert_vis_ft", "Vertical visibility in feet");
     metarFieldKeymap.set("metar_type", "Metar type");
-    metarFieldKeymap.set("elevation_m", "Station elev. (meters)");
+    metarFieldKeymap.set("elevation_m", "Station elevation in meters");
 }
 
 /**
+ * Get the description for a TAF/Metar weather acronym
+ * @param {string} acronym 
+ * @returns string, readable description of acronym 
+ */
+function getWeatherAcronymDescription(acronym) {
+    let retvalue = weatherAcronymKeymap.get(acronym);
+    if (retvalue === undefined) retvalue = acronym;
+    return retvalue;
+}
+/**
  * Load the wxkeymap Map object with weather code descriptions
  */
-function loadWeatherCodeKeymap() {
-    weatherCodeKeymap.set("FU", "Smoke");
-    weatherCodeKeymap.set("VA", "Volcanic Ash");
-    weatherCodeKeymap.set("HZ", "Haze");
-    weatherCodeKeymap.set("DU", "Dust");
-    weatherCodeKeymap.set("SA", "Sand");
-    weatherCodeKeymap.set("BLDU", "Blowing dust");
-    weatherCodeKeymap.set("BLSA", "Blowing sand");
-    weatherCodeKeymap.set("PO", "Dust devil");
-    weatherCodeKeymap.set("VCSS", "Vicinity sand storm");
-    weatherCodeKeymap.set("BR", "Mist or light fog");
-    weatherCodeKeymap.set("MIFG", "More or less continuous shallow fog");
-    weatherCodeKeymap.set("VCTS", "Vicinity thunderstorm");
-    weatherCodeKeymap.set("VIRGA", "Virga or precipitation not hitting ground");
-    weatherCodeKeymap.set("VCSH", "Vicinity showers");
-    weatherCodeKeymap.set("TS", "Thunderstorm with or without precipitation");
-    weatherCodeKeymap.set("SQ", "Squalls");
-    weatherCodeKeymap.set("FC", "Funnel cloud or tornado");
-    weatherCodeKeymap.set("SS", "Sand or dust storm");
-    weatherCodeKeymap.set("+SS", "Strong sand or dust storm");
-    weatherCodeKeymap.set("BLSN", "Blowing snow");
-    weatherCodeKeymap.set("DRSN", "Drifting snow");
-    weatherCodeKeymap.set("VCFG", "Vicinity fog");
-    weatherCodeKeymap.set("BCFG", "Patchy fog");
-    weatherCodeKeymap.set("PRFG", "Fog, sky discernable");
-    weatherCodeKeymap.set("FG", "Fog, sky undiscernable");
-    weatherCodeKeymap.set("FZFG", "Freezing fog");
-    weatherCodeKeymap.set("-DZ", "Light drizzle");
-    weatherCodeKeymap.set("DZ", "Moderate drizzle");
-    weatherCodeKeymap.set("+DZ", "Heavy drizzle");
-    weatherCodeKeymap.set("-FZDZ", "Light freezing drizzle");
-    weatherCodeKeymap.set("FZDZ", "Moderate freezing drizzle");
-    weatherCodeKeymap.set("+FZDZ", "Heavy freezing drizzle");
-    weatherCodeKeymap.set("-DZRA", "Light drizzle and rain");
-    weatherCodeKeymap.set("DZRA", "Moderate to heavy drizzle and rain");
-    weatherCodeKeymap.set("-RA", "Light rain");
-    weatherCodeKeymap.set("RA", "Moderate rain");
-    weatherCodeKeymap.set("+RA", "Heavy rain");
-    weatherCodeKeymap.set("-FZRA", "Light freezing rain");
-    weatherCodeKeymap.set("FZRA", "Moderate freezing rain");
-    weatherCodeKeymap.set("+FZRA", "Heavy freezing rain");
-    weatherCodeKeymap.set("-RASN", "Light rain and snow");
-    weatherCodeKeymap.set("RASN", "Moderate rain and snow");
-    weatherCodeKeymap.set("+RASN", "Heavy rain and snow");
-    weatherCodeKeymap.set("-SN", "Light snow");
-    weatherCodeKeymap.set("SN", "Moderate snow");
-    weatherCodeKeymap.set("+SN", "Heavy snow");
-    weatherCodeKeymap.set("SG", "Snow grains");
-    weatherCodeKeymap.set("IC", "Ice crystals");
-    weatherCodeKeymap.set("PE PL", "Ice pellets");
-    weatherCodeKeymap.set("PE", "Ice pellets");
-    weatherCodeKeymap.set("PL", "Ice pellets");
-    weatherCodeKeymap.set("-SHRA", "Light rain showers");
-    weatherCodeKeymap.set("SHRA", "Moderate rain showers");
-    weatherCodeKeymap.set("+SHRA", "Heavy rain showers");
-    weatherCodeKeymap.set("-SHRASN", "Light rain and snow showers");
-    weatherCodeKeymap.set("SHRASN", "Moderate rain and snow showers");
-    weatherCodeKeymap.set("+SHRASN", "Heavy rain and snow showers");
-    weatherCodeKeymap.set("-SHSN", "Light snow showers");
-    weatherCodeKeymap.set("SHSN", "Moderate snow showers");
-    weatherCodeKeymap.set("+SHSN", "Heavy snow showers");
-    weatherCodeKeymap.set("-GR", "Light showers with hail, not with thunder");
-    weatherCodeKeymap.set("GR", "Moderate to heavy showers with hail, not with thunder");
-    weatherCodeKeymap.set("TSRA", "Light to moderate thunderstorm with rain");
-    weatherCodeKeymap.set("TSGR", "Light to moderate thunderstorm with hail");
-    weatherCodeKeymap.set("+TSRA", "Thunderstorm with heavy rain");
-    weatherCodeKeymap.set("UP", "Unknown precipitation");
-    weatherCodeKeymap.set("NSW", "No significant weather");
+function loadWeatherAcronymKeymap() {
+    weatherAcronymKeymap.set("FU", "Smoke");
+    weatherAcronymKeymap.set("VA", "Volcanic Ash");
+    weatherAcronymKeymap.set("HZ", "Haze");
+    weatherAcronymKeymap.set("DU", "Dust");
+    weatherAcronymKeymap.set("SA", "Sand");
+    weatherAcronymKeymap.set("BLDU", "Blowing dust");
+    weatherAcronymKeymap.set("BLSA", "Blowing sand");
+    weatherAcronymKeymap.set("PO", "Dust devil");
+    weatherAcronymKeymap.set("VCSS", "Vicinity sand storm");
+    weatherAcronymKeymap.set("BR", "Mist or light fog");
+    weatherAcronymKeymap.set("MIFG", "More or less continuous shallow fog");
+    weatherAcronymKeymap.set("VCTS", "Vicinity thunderstorm");
+    weatherAcronymKeymap.set("VIRGA", "Virga or precipitation not hitting ground");
+    weatherAcronymKeymap.set("VCSH", "Vicinity showers");
+    weatherAcronymKeymap.set("TS", "Thunderstorm with or without precipitation");
+    weatherAcronymKeymap.set("SQ", "Squalls");
+    weatherAcronymKeymap.set("FC", "Funnel cloud or tornado");
+    weatherAcronymKeymap.set("SS", "Sand or dust storm");
+    weatherAcronymKeymap.set("+SS", "Strong sand or dust storm");
+    weatherAcronymKeymap.set("BLSN", "Blowing snow");
+    weatherAcronymKeymap.set("DRSN", "Drifting snow");
+    weatherAcronymKeymap.set("VCFG", "Vicinity fog");
+    weatherAcronymKeymap.set("BCFG", "Patchy fog");
+    weatherAcronymKeymap.set("PRFG", "Fog, sky discernable");
+    weatherAcronymKeymap.set("FG", "Fog, sky undiscernable");
+    weatherAcronymKeymap.set("FZFG", "Freezing fog");
+    weatherAcronymKeymap.set("-DZ", "Light drizzle");
+    weatherAcronymKeymap.set("DZ", "Moderate drizzle");
+    weatherAcronymKeymap.set("+DZ", "Heavy drizzle");
+    weatherAcronymKeymap.set("-FZDZ", "Light freezing drizzle");
+    weatherAcronymKeymap.set("FZDZ", "Moderate freezing drizzle");
+    weatherAcronymKeymap.set("+FZDZ", "Heavy freezing drizzle");
+    weatherAcronymKeymap.set("-DZRA", "Light drizzle and rain");
+    weatherAcronymKeymap.set("DZRA", "Moderate to heavy drizzle and rain");
+    weatherAcronymKeymap.set("-RA", "Light rain");
+    weatherAcronymKeymap.set("RA", "Moderate rain");
+    weatherAcronymKeymap.set("+RA", "Heavy rain");
+    weatherAcronymKeymap.set("-FZRA", "Light freezing rain");
+    weatherAcronymKeymap.set("FZRA", "Moderate freezing rain");
+    weatherAcronymKeymap.set("+FZRA", "Heavy freezing rain");
+    weatherAcronymKeymap.set("-RASN", "Light rain and snow");
+    weatherAcronymKeymap.set("RASN", "Moderate rain and snow");
+    weatherAcronymKeymap.set("+RASN", "Heavy rain and snow");
+    weatherAcronymKeymap.set("-SN", "Light snow");
+    weatherAcronymKeymap.set("SN", "Moderate snow");
+    weatherAcronymKeymap.set("+SN", "Heavy snow");
+    weatherAcronymKeymap.set("SG", "Snow grains");
+    weatherAcronymKeymap.set("IC", "Ice crystals");
+    weatherAcronymKeymap.set("PE PL", "Ice pellets");
+    weatherAcronymKeymap.set("PE", "Ice pellets");
+    weatherAcronymKeymap.set("PL", "Ice pellets");
+    weatherAcronymKeymap.set("-SHRA", "Light rain showers");
+    weatherAcronymKeymap.set("SHRA", "Moderate rain showers");
+    weatherAcronymKeymap.set("+SHRA", "Heavy rain showers");
+    weatherAcronymKeymap.set("-SHRASN", "Light rain and snow showers");
+    weatherAcronymKeymap.set("SHRASN", "Moderate rain and snow showers");
+    weatherAcronymKeymap.set("+SHRASN", "Heavy rain and snow showers");
+    weatherAcronymKeymap.set("-SHSN", "Light snow showers");
+    weatherAcronymKeymap.set("SHSN", "Moderate snow showers");
+    weatherAcronymKeymap.set("+SHSN", "Heavy snow showers");
+    weatherAcronymKeymap.set("-GR", "Light showers with hail, not with thunder");
+    weatherAcronymKeymap.set("GR", "Moderate to heavy showers with hail, not with thunder");
+    weatherAcronymKeymap.set("TSRA", "Light to moderate thunderstorm with rain");
+    weatherAcronymKeymap.set("TSGR", "Light to moderate thunderstorm with hail");
+    weatherAcronymKeymap.set("+TSRA", "Thunderstorm with heavy rain");
+    weatherAcronymKeymap.set("UP", "Unknown precipitation");
+    weatherAcronymKeymap.set("NSW", "No significant weather");
+}
+
+/**
+ * Get the description for a sky condition acronym
+ * @param {string} acronym 
+ * @returns acronym if found, otherwise just returns key
+ */
+function getSkyConditionDescription(acronym) {
+    let retvalue = skyConditionKeymap.get(acronym);
+    if (retvalue === undefined) {
+        retvalue = acronym;
+    }
+    return retvalue;
+}
+/**
+ * Map containing standard TAF/Metar acronyms
+ */
+function loadSkyConditionmKeymap() {
+    skyConditionKeymap.set("BKN", "Broken");
+    skyConditionKeymap.set("BECMG", "Becoming");
+    skyConditionKeymap.set("CB", "Cumulo-Nimbus");
+    skyConditionKeymap.set("IMC", "Instrument meteorological conditions"),
+    skyConditionKeymap.set("IMPR", "Improving");
+    skyConditionKeymap.set("INC", "In Clouds");
+    skyConditionKeymap.set("INS", "Inches");
+    skyConditionKeymap.set("INTER", "Intermittent");
+    skyConditionKeymap.set("INTSF", "Intensify(ing)");
+    skyConditionKeymap.set("INTST", "Intensity");
+    skyConditionKeymap.set("JTST", "Jet stream");
+    skyConditionKeymap.set("KM", "Kilometers");
+    skyConditionKeymap.set("KMH", "Kilometers per hour");
+    skyConditionKeymap.set("KT", "Knots");
+    skyConditionKeymap.set("L", "Low pressure area");
+    skyConditionKeymap.set("LAN", "Land");
+    skyConditionKeymap.set("LDA", "Landing distance available");
+    skyConditionKeymap.set("LDG", "Landing");
+    skyConditionKeymap.set("LGT", "Light");
+    skyConditionKeymap.set("LOC", "Locally");
+    skyConditionKeymap.set("LSQ", "Line squall");
+    skyConditionKeymap.set("LSR", "Loose snow on runway");
+    skyConditionKeymap.set("LTG", "Lightning");
+    skyConditionKeymap.set("LYR", "Layer");
+    skyConditionKeymap.set("M", "Meters");
+    skyConditionKeymap.set("M", "Minus or below zero");
+    skyConditionKeymap.set("M", "Less than lowest reportable sensor value");
+    skyConditionKeymap.set("MAX", "Maximum");
+    skyConditionKeymap.set("MB", "Millibars");
+    skyConditionKeymap.set("MET", "Meteorological");
+    skyConditionKeymap.set("MI", "Shallow");
+    skyConditionKeymap.set("MIN", "Minutes");
+    skyConditionKeymap.set("MNM", "Minimum");
+    skyConditionKeymap.set("MOD", "Moderate");
+    skyConditionKeymap.set("MOV", "Move, moving");
+    skyConditionKeymap.set("MPS", "Meters per second");
+    skyConditionKeymap.set("MS", "Minus");
+    skyConditionKeymap.set("MSL", "Mean sea level");
+    skyConditionKeymap.set("MTW", "Mountain waves");
+    skyConditionKeymap.set("MU", "Runway friction coefficent");
+    skyConditionKeymap.set("NC", "No change");
+    skyConditionKeymap.set("NIL", "None, nothing");
+    skyConditionKeymap.set("NM", "Nautical mile(s)");
+    skyConditionKeymap.set("NMRS", "Numerous");
+    skyConditionKeymap.set("NO", "Not available");
+    skyConditionKeymap.set("NOSIG", "No significant change");
+    skyConditionKeymap.set("NS", "Nimbostratus");
+    skyConditionKeymap.set("NSC", "No significant clouds");
+    skyConditionKeymap.set("NSW", "No Significant Weather");
+    skyConditionKeymap.set("OBS", "Observation");
+    skyConditionKeymap.set("OBSC", "Obscuring");
+    skyConditionKeymap.set("OCNL", "Occasional");
+    skyConditionKeymap.set("OKTA", "Eight of sky cover");
+    skyConditionKeymap.set("OTP", "On top");
+    skyConditionKeymap.set("OTS", "Out of service");
+    skyConditionKeymap.set("OVC", "Overcast");
+    skyConditionKeymap.set("P", "Greater than highest reportable sensor value");
+    skyConditionKeymap.set("P6SM", "Visibility greater than 6 SM");
+    skyConditionKeymap.set("PAEW", "Personnel and equipment working");
+    skyConditionKeymap.set("PE", "Ice Pellets");
+    skyConditionKeymap.set("PJE", "Parachute Jumping Exercise");
+    skyConditionKeymap.set("PK WND", "Peak wind");
+    skyConditionKeymap.set("PLW", "Plow/plowed");
+    skyConditionKeymap.set("PNO", "Precipitation amount not available");
+    skyConditionKeymap.set("PO", "Dust/Sand Whirls");
+    skyConditionKeymap.set("PPR", "Prior permission required");
+    skyConditionKeymap.set("PR", "Partial");
+    skyConditionKeymap.set("PRESFR", "Pressure falling rapidly");
+    skyConditionKeymap.set("PRESRR", "Pressure rising rapidly");
+    skyConditionKeymap.set("PROB", "Probability");
+    skyConditionKeymap.set("PROB30", "Probability 30 percent");
+    skyConditionKeymap.set("PS", "Plus");
+    skyConditionKeymap.set("PSR", "Packed snow on runway");
+    skyConditionKeymap.set("PWINO", "Precipitation id sensor not available");
+    skyConditionKeymap.set("PY", "Spray");
+    skyConditionKeymap.set("R", "Runway (in RVR measurement)");
+    skyConditionKeymap.set("RA", "Rain");
+    skyConditionKeymap.set("RAB", "Rain Began");
+    skyConditionKeymap.set("RADAT", "Radiosonde observation addl data");
+    skyConditionKeymap.set("RAE", "Rain Ended");
+    skyConditionKeymap.set("RAPID", "Rapid(ly)");
+    skyConditionKeymap.set("RASN", "Rain and snow");
+    skyConditionKeymap.set("RCAG", "Remote Center Air/Ground Comm Facility");
+    skyConditionKeymap.set("RMK", "Remark");
+    skyConditionKeymap.set("RVR", "Runway visual range");
+    skyConditionKeymap.set("RVRNO", "RVR not available");
+    skyConditionKeymap.set("RY/RWY", "Runway");
+    skyConditionKeymap.set("SA", "Sand");
+    skyConditionKeymap.set("SAND", "Sandstorm");
+    skyConditionKeymap.set("SC", "Stratocumulus");
+    skyConditionKeymap.set("SCSL", "Stratocumulus standing lenticular cloud");
+    skyConditionKeymap.set("SCT", "Scattered cloud coverage");
+    skyConditionKeymap.set("SEC", "Seconds");
+    skyConditionKeymap.set("SEV", "Severe");
+    skyConditionKeymap.set("SFC", "Surface");
+    skyConditionKeymap.set("SG", "Snow Grains");
+    skyConditionKeymap.set("SH", "Shower");
+    skyConditionKeymap.set("SHWR", "Shower");
+    skyConditionKeymap.set("SIGMET", "Information from MWO");
+    skyConditionKeymap.set("SIR", "Snow and ice on runway");
+    skyConditionKeymap.set("SKC", "Sky Clear");
+    skyConditionKeymap.set("SLP", "Sea Level Pressure in MB");
+    skyConditionKeymap.set("SLPNO", "Sea-level pressure not available");
+    skyConditionKeymap.set("SLR", "Slush on runway");
+    skyConditionKeymap.set("SLW", "Slow");
+    skyConditionKeymap.set("SM", "Statute Miles");
+    skyConditionKeymap.set("SMK", "Smoke");
+    skyConditionKeymap.set("SMO", "Supplementary meteorological office");
+    skyConditionKeymap.set("SN", "Snow");
+    skyConditionKeymap.set("SPECI", "Special Report");
+    skyConditionKeymap.set("SQ", "Squall");
+    skyConditionKeymap.set("SS", "Sandstorm");
+    skyConditionKeymap.set("SSR", "Secondary Surveillance Radar");
+    skyConditionKeymap.set("T", "Temperature");
+    skyConditionKeymap.set("TAF", "Terminal aerodrome forecast in code");
+    skyConditionKeymap.set("TAPLEY", "Tapley runway friction coefficient");
+    skyConditionKeymap.set("TAR", "Terminal Area Surveillance Radar");
+    skyConditionKeymap.set("TAIL", "Tail wind");
+    skyConditionKeymap.set("TCH", "Threshold Crossing Height");
+    skyConditionKeymap.set("TCU", "Towering Cumulus");
+    skyConditionKeymap.set("TDO", "Tornado");
+    skyConditionKeymap.set("TDWR", "Terminal Doppler Weather Radar");
+    skyConditionKeymap.set("TEMPO", "TEMPO");
+    skyConditionKeymap.set("TEND", "Trend or tending to");
+    skyConditionKeymap.set("TKOF", "Takeoff");
+    skyConditionKeymap.set("TMPA", "Traffic Management Program Alert");
+    skyConditionKeymap.set("TODA", "Takeoff distance available");
+    skyConditionKeymap.set("TOP", "Cloud top");
+    skyConditionKeymap.set("TORA", "Takeoff run available");
+    skyConditionKeymap.set("TS", "Thunderstorm");
+    skyConditionKeymap.set("TSNO", "Thunderstorm/lightning detector not available");
+    skyConditionKeymap.set("TURB", "Turbulence");
+    skyConditionKeymap.set("TWY", "Taxiway");
+    skyConditionKeymap.set("UFN", "Until further notice");
+    skyConditionKeymap.set("UNL", "Unlimited");
+    skyConditionKeymap.set("UP", "Unknown Precipitation");
+    skyConditionKeymap.set("UTC", "Coordinated Universal Time (=GMT)");
+    skyConditionKeymap.set("V", "Variable (wind direction and RVR)");
+    skyConditionKeymap.set("VA", "Volcanic Ash");
+    skyConditionKeymap.set("VC", "Vicinity");
+    skyConditionKeymap.set("VER", "Vertical");
+    skyConditionKeymap.set("VFR", "Visual flight rules");
+    skyConditionKeymap.set("VGSI", "Visual Glide Slope Indicator");
+    skyConditionKeymap.set("VIS", "Visibility");
+    skyConditionKeymap.set("VISNO [LOC]", "Visibility Indicator at second location not available");
+    skyConditionKeymap.set("VMS", "Visual meteorological conditions");
+    skyConditionKeymap.set("VOLMET", "Meteorological information for aircraft in flight");
+    skyConditionKeymap.set("VRB", "Variable wind direction");
+    skyConditionKeymap.set("VRBL", "Variable");
+    skyConditionKeymap.set("VSP", "Vertical speed");
+    skyConditionKeymap.set("VV", "Vertical Visibility (indefinite ceiling)");
+    skyConditionKeymap.set("WAAS", "Wide Area Augmentation System");
+    skyConditionKeymap.set("WDSPR", "Widespread");
+    skyConditionKeymap.set("WEF", "With effect from");
+    skyConditionKeymap.set("WIE", "With immediate effect");
+    skyConditionKeymap.set("WIP", "Work in progress");
+    skyConditionKeymap.set("WKN", "Weaken(ing)");
+    skyConditionKeymap.set("WR", "Wet runway");
+    skyConditionKeymap.set("WS", "Wind shear");
+    skyConditionKeymap.set("WSHFT", "Wind shift (in minutes after the hour)");
+    skyConditionKeymap.set("WSP", "Weather Systems Processor");
+    skyConditionKeymap.set("WSR", "Wet snow on runway");
+    skyConditionKeymap.set("WST", "Convective Significant Meteorological Information");
+    skyConditionKeymap.set("WTSPT", "Waterspout");
+    skyConditionKeymap.set("WW", "Severe Weather Watch Bulletin");
+    skyConditionKeymap.set("WX", "Weather");
 }
 
 /**
@@ -1551,45 +2022,65 @@ function loadWeatherCodeKeymap() {
     
     for (let i = 0; i < vals.length; i++) {
         if (i === 0) {
-            outstr = weatherCodeKeymap.get(vals[i]);
+            outstr = weatherAcronymKeymap.get(vals[i]);
         }
         else {
-            outstr += ` / ${weatherCodeKeymap.get(vals[i])}`;
+            outstr += ` / ${weatherAcronymKeymap.get(vals[i])}`;
         }
     }
     return outstr;
 }
 
 /**
+ * Get the description for an icing code
+ * @param {string} code 
+ * @returns string, readable description of code 
+ */
+ function getIcingCodeDescription(code) {
+    let retvalue = icingCodeKeymap.get(code);
+    if (retvalue === undefined) retvalue = code;
+    return retvalue;
+}
+/**
  * Load readable descriptions for Icing codes
  */
 function loadIcingCodeKeymap() {
     icingCodeKeymap.set("0", "None");
     icingCodeKeymap.set("1", "Light");
-    icingCodeKeymap.set("2", "Light in cloud")
-    icingCodeKeymap.set("3", "Light in precip")
+    icingCodeKeymap.set("2", "Light in clouds")
+    icingCodeKeymap.set("3", "Light in precipitation")
     icingCodeKeymap.set("4", "Moderate");   
-    icingCodeKeymap.set("5", "Moderate in cloud");
-    icingCodeKeymap.set("6", "Moderate in precip");
+    icingCodeKeymap.set("5", "Moderate in clouds");
+    icingCodeKeymap.set("6", "Moderate in precipitation");
     icingCodeKeymap.set("7", "Severe");
-    icingCodeKeymap.set("8", "Severe in cloud");
-    icingCodeKeymap.set("9", "Severe in precip");     
+    icingCodeKeymap.set("8", "Severe in clouds");
+    icingCodeKeymap.set("9", "Severe in precipitation");     
 }
 
+/**
+ * Get the description for a turbulence code
+ * @param {string} code 
+ * @returns string, readable description of code 
+ */
+ function getTurbulenceCodeDescription(code) {
+    let retvalue = turbulenceCodeKeymap.get(code);
+    if (retvalue === undefined) retvalue = code;
+    return retvalue;
+}
 /**
  * Load readable descriptions for Turbulence codes
  */
 function loadTurbulenceCodeKeymap() {
     turbulenceCodeKeymap.set("0", "Light");
     turbulenceCodeKeymap.set("1", "Light");
-    turbulenceCodeKeymap.set("2", "Moderate clean air occasional")
-    turbulenceCodeKeymap.set("3", "Moderate clean air frequent")
-    turbulenceCodeKeymap.set("4", "Moderate cloud occasional");   
-    turbulenceCodeKeymap.set("5", "Moderate cloud frequent");
-    turbulenceCodeKeymap.set("6", "Severe clean air occasional");
-    turbulenceCodeKeymap.set("7", "Severe clean air frequent");
-    turbulenceCodeKeymap.set("8", "Severe cloud occasional");
-    turbulenceCodeKeymap.set("9", "Severe cloud frequent");
+    turbulenceCodeKeymap.set("2", "Moderate in clean air occasionally")
+    turbulenceCodeKeymap.set("3", "Moderate in clean air frequent");
+    turbulenceCodeKeymap.set("4", "Moderate in clouds occasionally");   
+    turbulenceCodeKeymap.set("5", "Moderate in clouds frequently");
+    turbulenceCodeKeymap.set("6", "Severe in clean air occasionally");
+    turbulenceCodeKeymap.set("7", "Severe in clean air frequent");
+    turbulenceCodeKeymap.set("8", "Severe in clouds occasionally");
+    turbulenceCodeKeymap.set("9", "Severe in clouds frequently");
     turbulenceCodeKeymap.set("X", "Extreme");
     turbulenceCodeKeymap.set("x", "Extreme");
 }
