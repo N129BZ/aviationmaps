@@ -607,16 +607,16 @@ map.on('click', (evt) => {
             hasfeature = true;
             let datatype = feature.get("datatype");
             if (datatype === "metar") {
-                createMetarPopup(feature);
+                displayMetarPopup(feature);
             }
             else if (datatype === "taf"){
-                createTafPopup(feature);
+                displayTafPopup(feature);
             }
             else if (datatype === "pirep") {
-                createPirepPopup(feature);
+                displayPirepPopup(feature);
             }
             else { // simple airport marker
-                createAirportPopup(feature);
+                displayAirportPopup(feature);
             }
             let coordinate = evt.coordinate;
             popupoverlay.setPosition(coordinate);
@@ -631,7 +631,7 @@ map.on('click', (evt) => {
  * Create the html for a METAR popup element
  * @param {*} feature: the metar the user clicked on 
  */
-function createMetarPopup(feature) {
+function displayMetarPopup(feature) {
     let thismetar = feature.get("metar");
     let ident = thismetar.station_id;
     let cat = thismetar.flight_category;
@@ -653,9 +653,16 @@ function createMetarPopup(feature) {
     let vis = getDistanceUnits(thismetar.visibility_statute_mi);
     let wxcode = thismetar.wx_string !== undefined ? decodeWxDescriptions(thismetar.wx_string) : "";
     let taflabelcssClass = "taflabel"
-    let skyconditions = decodeSkyCondition(thismetar.sky_condition, taflabelcssClass);
-    let icingconditions = decodeIcingOrTurbulenceCondition(thismetar.icing_condition, taflabelCssClass);
-
+    let skycondition = thismetar.sky_condition;
+    let skyconditions;
+    let icingconditions;
+    if (skycondition !== undefined) {
+        skyconditions = decodeSkyCondition(skycondition, taflabelcssClass);
+    }
+    let icingcondition = thismetar.icing_condition;
+    if (icingcondition !== undefined) {
+        icingconditions = decodeIcingOrTurbulenceCondition(icingcondition, taflabelCssClass);
+    }
     let label = `<label class="#class">`;
     let css;
     switch(cat) {
@@ -685,7 +692,8 @@ function createMetarPopup(feature) {
         html +=  (altim != "" && altim != "undefined") ? `Altimeter:&nbsp<b>${altim}&nbsphg</b><br/>` : "";
         html +=    (vis != "" && vis != "undefined") ? `Horizontal Visibility:&nbsp<b>${vis}</b><br/>` : "";
         html += (wxcode != "" && wxcode != "undefined") ? `Weather:&nbsp<b>${wxcode}</b><br/>`: "";
-        html += (skyconditions != "" && skyconditions != "undefined") ? `${skyconditions}` : "";
+        html += (skyconditions != undefined && skyconditions != "") ? `${skyconditions}` : "";
+        html += (icingconditions != undefined && icingconditions != "") ? `${icingconditions}` : "";
         html += `</p></code></pre><br /></div>`;
         popupcloser.style.left = "30px";
         popupcloser.style.top = "88%";
@@ -698,11 +706,11 @@ function createMetarPopup(feature) {
  * Create the html for a TAF popup element
  * @param {*} feature: the taf the user clicked on
  */
-function createTafPopup(feature) {
+function displayTafPopup(feature) {
     let thistaf = feature.get("taf");
     let forecast = thistaf.forecast;
     let outerhtml = `<div class="taftitle">` + 
-                        `<label class="taftitlelabel">Terminal Area Forecast - ${feature.get("ident")}</label><p></p>` +
+                        `<label class="taftitlelabel">Terminal Area Forecast - ${feature.get("ident")}</label>` +
                     `</div>` +
                     `<div class="taf">` + 
                         `<pre><code>` +
@@ -717,31 +725,40 @@ function createTafPopup(feature) {
 
     let html = "<div>";
 
-    Object.values(forecast).forEach((forecastvalue) => {
+    Object.values(forecast).forEach((value) => {
         html += "<p>";
-        let from_to = `<label class="tafsubheader">`;
-        Object.keys(forecastvalue).forEach((forecastkey) => {
-            let subobj = forecastvalue[forecastkey];
-            let fieldname = getTafFieldDescription(forecastkey);
-            switch (forecastkey) {
+        let fromto = `<label class="tafsubheader">`;
+        Object.keys(value).forEach((key) => {
+            let subobj = value[key];
+            let fieldname = tafFieldKeymap.get(key);
+            switch (key) {
                 case "fcst_time_from":
-                    from_to += `<b>${subobj}</b>`;
+                    fromto += `<b>${subobj}</b>`;
                     break;
                 case "fcst_time_to":
-                    from_to += `&nbsp&nbspto&nbsp&nbsp<b>${subobj}</b></label><br />`
-                    html += `<label class="fcstlabel">${from_to}</label><br />`;
+                    fromto += `&nbsp&nbspto&nbsp&nbsp<b>${subobj}</b></label><br />`
+                    html += `<label class="fcstlabel">${fromto}</label><br />`;
                     break;
-                case "temp_c":
-                case "dewpoint_c":
+                case "change_indicator":
                 case "time_becoming":
                 case "probability":
+                case "wind_dir_degrees":
                 case "wind_speed_kt":
                 case "wind_gust_kt":
                 case "wind_shear_hgt_ft_agl":
+                case "wind_shear_dir_degrees":
                 case "wind_shear_speed_kt":
+                case "altim_in_hg":
                 case "vert_vis_ft":
-                case "visibility_statute_mi":
-                    html += `<label class="taflabel">${fieldname}: <b>${subobj}</b></label><br />`;
+                case "wx_string":
+                    if (key === "wx_string") {
+                        let lineval = decodeWxDescriptions(subobj);
+                        html += `<label class="tafwxlabel">${fieldname}: <b>${lineval}</b></label><br />`;
+                    }
+                    else {
+                        html += `<label class="taflabel">${fieldname}: <b>${subobj}</b></label><br />`;
+                    }
+                    break;
                 case "sky_condition":
                     html += `<label class="tafskyheader">${fieldname}</label><br />`;
                     html += decodeSkyCondition(subobj);
@@ -749,29 +766,11 @@ function createTafPopup(feature) {
                 case "turbulence_condition":
                 case "icing_condition":
                     html += `<label class="tafskyheader">${fieldname}</label><br />`;
-                    html += decodeIcingOrTurbulenceCondition(subobj);
+                    html += decodeIcingCondition(subobj);
                     break;
                 case "temperature":
                     break;
-                case "altim_in_hg":
-                    let altimvalue = getInchesOfMercury(subobj);
-                    html += `<label class="taflabel">${fieldname}: <b>${altimvalue}</b></label><br />`;
-                    break;
-                case "wx_string":
-                    let lineval = decodeWxDescriptions(subobj);
-                    html += `<label class="tafwxlabel">${fieldname}: <b>${lineval}</b></label><br />`;
-                    break;
-                case "change_indicator":
-                    let change = getSkyConditionDescription(subobj);
-                    html += `<label class="taflabel">${fieldname}: <b>${change}</b></label><br />`;
-                    break;
-                case "wind_shear_dir_degrees":
-                case "wind_dir_degrees":
-                    html += `<label class="taflabel">${fieldname}: <b>${subobj}°</b></label><br />`;
-                    break;
-                default:
-                    console.log(`forecastkey: ${forecastkey} NOT FOUND!`);
-                    break;
+
             }
         });
         html += "</p><hr>";
@@ -788,7 +787,7 @@ function createTafPopup(feature) {
  * Create the html for a PIREP popup element
  * @param {object} feature: the pirep the user clicked on
  */
- function createPirepPopup(feature) {
+ function displayPirepPopup(feature) {
     let thispirep = feature.get("pirep");
     let outerhtml = `<div class="taftitle">` + 
                         `<label class="taftitlelabel">${thispirep.pirep_type} FROM AIRCRAFT: ${thispirep.aircraft_ref}</label><p></p>` +
@@ -806,10 +805,13 @@ function createTafPopup(feature) {
     let html = "<div>";
 
     let pireplabel = `<label class="pirepitem">`
-
+    let rawpirep = "";
     Object.keys(thispirep).forEach((pirepkey) => {
         let pirepvalue = thispirep[pirepkey];
-        let fieldname = getTafFieldDescription(pirepkey);
+        let fieldname = getFieldDescription(pirepkey);
+        if (pirepkey.search("raw") > -1) {
+            rawpirep = pirepvalue;
+        }
         switch (pirepkey) {
             case "receipt_time":
                 html += `${pireplabel}${fieldname}: <b>${pirepvalue}</b></label><br />`;
@@ -846,6 +848,7 @@ function createTafPopup(feature) {
                 html += decodeIcingOrTurbulenceCondition(pirepvalue, "pirepitem");
                 break;
             case "temperature":
+                html += `<label class="pirepskyheader">Weather</label><br />`;
                 break;
             case "altim_in_hg":
                 let altimvalue = getInchesOfMercury(pirepvalue);
@@ -867,7 +870,7 @@ function createTafPopup(feature) {
                 break;
         }
     });
-    html += "</p><hr></div>";
+    html += `</p><hr></div><textarea class="rawdata">${rawpirep}</textarea><br />`;
     html = outerhtml.replace("###", html);
     popupcloser.style.left = "28px";
     popupcloser.style.top = "93%";
@@ -877,36 +880,32 @@ function createTafPopup(feature) {
 
 /**
  * Decode sky conditions
- * @param {json object} skyobject 
+ * @param {json object} skyconditions 
+ * @param {string} css class to use 
  * @returns html string 
  */
-function decodeSkyCondition(skyobject, labelclassCss) {
+ function decodeSkyCondition(skycondition, labelclassCss) {
     let html = "";
-    if (skyobject !== undefined) {
-        let skyvalues = Object.values(skyobject);
-        let skykeys = Object.keys(skyobject);
-        let keycount = -1;
+    if (skycondition !== undefined) {
         try {
-            Object.values(skyobject).forEach((condition) => {
-                let cleankey = "";
-                let sublabel = "";
-                let keyvalue = "";
+            let values = Object.values(skycondition);
+            for (const x in skycondition) {
+                let condition = skycondition[x];
+                let fieldname = "";
+                let fieldvalue = "";
                 if (typeof(condition) !== "string") {
-                    Object.keys(condition).forEach((conditionkey) => {
-                        cleankey = getTafFieldDescription(conditionkey);
-                        keyvalue = getSkyConditionDescription(condition[conditionkey]);
-                        sublabel = `<label class="${labelclassCss}">${cleankey}: <b>${keyvalue}</b></label><br />`;
-                        html += sublabel;
-                    });
+                    for (const index in condition) {
+                        fieldname = getFieldDescription(index);
+                        fieldvalue = condition[index];
+                        html += `<label class="${labelclassCss}">${fieldname}: <b>${fieldvalue}</b></label><br />`;
+                    }
                 }
                 else {
-                    keycount ++;
-                    cleankey = getTafFieldDescription(skykeys[keycount]);
-                    keyvalue = getSkyConditionDescription(skyvalues[keycount]);
-                    sublabel = `<label class="${labelclassCss}">${cleankey}: <b>${keyvalue}</b></label><br />`;
-                    html += sublabel;
+                    fieldname = getFieldDescription(x);
+                    fieldvalue = getSkyConditionDescription(condition);
+                    html += `<label class="${labelclassCss}">${fieldname}: <b>${fieldvalue}</b></label><br />`;
                 }
-            });
+            }
         }
         catch (error) {
             console.log(error.message);
@@ -931,30 +930,51 @@ function getInchesOfMercury(altimeter) {
  * @param {string} CSS class to use for the line items
  * @returns html string
  */
-function decodeIcingOrTurbulenceCondition(conditionobject, labelclassCss) {
+function decodeIcingOrTurbulenceCondition(condition, labelclassCss) {
     let html = "";
-    if (conditionobject != undefined) {
+    let image = "";
+    let label = "";
+    let conditiontype = "";
+    let conditionvalue = "";
+    if (condition != undefined) {
         try {
-            let conditionvalues = Object.values(conditionobject);
-            let conditionkeys = Object.keys(conditionobject);
-            let turbulence = "";
-            let index = -1;
-            conditionvalues.forEach((condition) => {
-                index++;
-                // the first condition is the code, followed by min alt, then max alt
-                let conditionkey = conditionkeys[index];
-                if (index === 0) {
-                    turbulence = getTurbulenceCodeDescription(condition);
+            let condkeys = Object.keys(condition);
+            let condvalues = Object.values(condition);
+            condkeys.forEach((key) => {
+                if (Array.isArray(condvalues[key])) {
+                    html = decodeIcingOrTurbulenceCondition(condvalues[key], labelclassCss);
                 }
-                else { 
-                    turbulence = condition;
-                    if (index === 2) { 
-                        index = -1; 
-                    }
+                let fieldname = getFieldDescription(key);
+                let fieldvalue = condition[key];
+                switch(key) {
+                    case "turbulence_type":
+                    case "icing_type":
+                        conditiontype = fieldname;
+                        conditionvalue = fieldvalue;
+                        html += `<label class="pirepitem">${fieldname}: <b>${fieldvalue}</b></label><br />`;
+                        break; 
+                    case "turbulence_intensity":
+                    case "icing_intensity":
+                        conditiontype = fieldname;
+                        image = getConditionImage("turbulence", fieldvalue);
+                        html += `<label class="pirepitem">${fieldname}:<br /></label><br />`;
+                        html += `<div class="conditionimage"><image src="${URL_SERVER}/img/${image}"><div><br />`;
+                        break;
+                    case "turbulence_base_ft_msl":
+                    case "icing_base_ft_msl":
+                        conditiontype = fieldname;
+                        conditionvalue = fieldvalue;
+                        html += `<label class="pirepitem">${fieldname}: <b>${fieldvalue}</b></label><br />`;
+                        break;
+                    case "turbulence_top_ft_msl":
+                    case "icing_top_ft_msl":
+                        conditiontype = fieldname;
+                        conditionvalue = fieldvalue;
+                        html += `<label class="pirepitem">${fieldname}: <b>${fieldvalue}</b></label></br />`;
+                        break;
+                    default:
+                        break;
                 }
-                let fieldlabel = getTafFieldDescription(conditionkey);
-                let label = `<label class="${labelclassCss}">${fieldlabel}: <b>${turbulence}</b></label><br />`;
-                html += label;
             });
         }
         catch (error) {
@@ -965,10 +985,82 @@ function decodeIcingOrTurbulenceCondition(conditionobject, labelclassCss) {
 }
 
 /**
+ * Get the image that corresponds to icing or turbulence condition
+ * @param {string} conditiontype 
+ * @param {string} conditionvalue 
+ * @returns html image string
+ */
+function getConditionImage(conditiontype, conditionvalue) {
+    let image = "";
+    if (conditiontype === "icing") {
+        switch (conditionvalue) {
+            case "NEGclr":
+            case "NEG":
+                image = "Nil.png";
+                break;
+            case "RIME":
+            case "TRC":
+                image = "IceTrace.png";
+                break;
+            case "TRC-LGT":
+                image = "IceTraceLight.png"
+            case "LGT":
+                image = "IceLight.png";
+                break;
+            case "LGT-MOD":
+                image = "IceLightMod.png";
+                break;
+            case "MOD":
+                image = "IceMod.png";
+                break;
+            case "MOD-SEV":
+                image = "IceLight.png";
+                break;
+            case "SEV":
+                image = "IceSevere.png";
+                break;
+        }
+    }   
+    else if (conditiontype === "turbulence") { 
+        switch (conditionvalue) {
+            case "NEG":
+            case "NEGclr": 
+                image = "Nil.png";
+                break;
+            case "SMTH-LGT":
+            case "LGT":
+                image = "TurbSmoothLight.png";
+            case "LGT-CHOP":
+                image = "TurbLight.png";    
+                break;
+            case "CHOP":
+            case "LGT-MOD":
+                image = "TurbLightMod.png";
+                break;
+            case "MOD":
+            case "MOD-CHOP":
+                image = "TurbMod.png";
+                break;
+            case "MOD-SEV":
+                image = "TurbModSevere.png";
+                break;
+            case "SEV":
+                image = "TurbSevere.png";
+                break;
+        }
+    }
+    else {
+        image = "";
+    }
+    
+    return image;
+}
+
+/**
  * Build the html for an airport feature
  * @param {*} feature: the airport the user clicked on 
  */
-function createAirportPopup(feature) {
+function displayAirportPopup(feature) {
     let ident = feature.get("ident");
     let name = getFormattedAirportName(ident)
     let html = `<div id="#featurepopup"><pre><code><p>`;
@@ -1634,7 +1726,7 @@ function getAltimeterSetting(altimeter) {
  * @param {string} fieldname 
  * @returns string, readable description of fieldname 
  */
- function getTafFieldDescription(fieldname) {
+ function getFieldDescription(fieldname) {
     let retvalue = fieldname;
     if (!Number.isInteger(fieldname)) {
         retvalue = tafFieldKeymap.get(fieldname);
@@ -1649,10 +1741,6 @@ function getAltimeterSetting(altimeter) {
  * Load normalized TAF field names
  */
 function loadTafFieldKeymap() {
-    tafFieldKeymap.set("turbulence_freq", "Frequency");
-    tafFieldKeymap.set("turbulence_type", "Type");
-    tafFieldKeymap.set("turbulence_top_ft_msl", "Top in feet MSL");
-    tafFieldKeymap.set("turbulence_base_ft_msl", "Base in feet MSL");
     tafFieldKeymap.set("temp_c", "Temperature °C");
     tafFieldKeymap.set("icing_type", "Icing type");
     tafFieldKeymap.set("pirep_type", "Pirep type");
@@ -1682,15 +1770,25 @@ function loadTafFieldKeymap() {
     tafFieldKeymap.set("turbulence_condition", "Turbulence condition");
     tafFieldKeymap.set("sky_cover", "Sky cover");
     tafFieldKeymap.set("cloud_base_ft_agl", "Cloud base feet AGL");
+    tafFieldKeymap.set("cloud_base_ft_msl", "Cloud base feet MSL");
     tafFieldKeymap.set("cloud_base", "Cloud base");
     // icing fieldnames
     tafFieldKeymap.set("icing_intensity", "Intensity");
     tafFieldKeymap.set("icing_min_alt_ft_agl", "Min altitude feet AGL");
     tafFieldKeymap.set("icing_max_alt_ft_agl", "Max altitude feet AGL");
+    tafFieldKeymap.set("icing_min_alt_ft_msl", "Min altitude feet MSL");
+    tafFieldKeymap.set("icing_max_alt_ft_agl", "Max altitude feet MSL");
+    tafFieldKeymap.set("icing_type", "Type");
+    tafFieldKeymap.set("icing_top_ft_msl", "Top in feet MSL");
+    tafFieldKeymap.set("icing_base_ft_msl", "Base in feet MSL");
     // turbulence fieldnames
     tafFieldKeymap.set("turbulence_intensity", "Intensity");
     tafFieldKeymap.set("turbulence_min_alt_ft_agl", "Min altitude feet AGL");
     tafFieldKeymap.set("turbulence_max_alt_ft_agl", "Max altitude feet AGL");
+    tafFieldKeymap.set("turbulence_freq", "Frequency");
+    tafFieldKeymap.set("turbulence_type", "Type");
+    tafFieldKeymap.set("turbulence_top_ft_msl", "Top in feet MSL");
+    tafFieldKeymap.set("turbulence_base_ft_msl", "Base in feet MSL");
 }
 
 /**
@@ -1842,7 +1940,7 @@ function getSkyConditionDescription(acronym) {
 /**
  * Map containing standard TAF/Metar acronyms
  */
-function loadSkyConditionmKeymap() {
+ function loadSkyConditionmKeymap() {
     skyConditionKeymap.set("BKN", "Broken");
     skyConditionKeymap.set("BECMG", "Becoming");
     skyConditionKeymap.set("CB", "Cumulo-Nimbus");
