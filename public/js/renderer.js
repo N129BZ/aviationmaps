@@ -629,37 +629,37 @@ map.on('click', (evt) => {
 
 /**
  * Create the html for a METAR popup element
- * @param {*} feature: the metar the user clicked on 
+ * @param {feature} ol.Feature: the metar feature the user clicked on 
  */
 function displayMetarPopup(feature) {
-    let thismetar = feature.get("metar");
-    let ident = thismetar.station_id;
-    let cat = thismetar.flight_category;
+    let metar = feature.get("metar");
+    let ident = metar.station_id;
+    let cat = metar.flight_category;
     if (cat == undefined || cat == "undefined"){
         cat = "VFR";
     }
-    let time = thismetar.observation_time;
-    if (settings.uselocaltimeformetars) {
+    let time = metar.observation_time;
+    if (settings.uselocaltime) {
         time = getLocalTime(time);
     }
-    let tempC = thismetar.temp_c;
-    let dewpC = thismetar.dewpoint_c;
-    let temp = convertCtoF(thismetar.temp_c);
-    let dewp = convertCtoF(thismetar.dewpoint_c);
-    let windir = thismetar.wind_dir_degrees;
-    let winspd = thismetar.wind_speed_kt + "";
-    let wingst = thismetar.wind_gust_kt + ""; 
-    let altim = getAltimeterSetting(thismetar.altim_in_hg);
-    let vis = getDistanceUnits(thismetar.visibility_statute_mi);
-    let wxcode = thismetar.wx_string !== undefined ? decodeWxDescriptions(thismetar.wx_string) : "";
+    let tempC = metar.temp_c;
+    let dewpC = metar.dewpoint_c;
+    let temp = convertCtoF(metar.temp_c);
+    let dewp = convertCtoF(metar.dewpoint_c);
+    let windir = metar.wind_dir_degrees;
+    let winspd = metar.wind_speed_kt + "";
+    let wingst = metar.wind_gust_kt + ""; 
+    let altim = getAltimeterSetting(metar.altim_in_hg);
+    let vis = getDistanceUnits(metar.visibility_statute_mi);
+    let wxcode = metar.wx_string !== undefined ? decodeWxDescriptions(metar.wx_string) : "";
     let taflabelcssClass = "taflabel"
-    let skycondition = thismetar.sky_condition;
+    let skycondition = metar.sky_condition;
     let skyconditions;
     let icingconditions;
     if (skycondition !== undefined) {
         skyconditions = decodeSkyCondition(skycondition, taflabelcssClass);
     }
-    let icingcondition = thismetar.icing_condition;
+    let icingcondition = metar.icing_condition;
     if (icingcondition !== undefined) {
         icingconditions = decodeIcingOrTurbulenceCondition(icingcondition, taflabelCssClass);
     }
@@ -704,11 +704,11 @@ function displayMetarPopup(feature) {
 
 /**
  * Create the html for a TAF popup element
- * @param {*} feature: the taf the user clicked on
+ * @param {feature} ol.Feature: the taf feature the user clicked on
  */
 function displayTafPopup(feature) {
-    let thistaf = feature.get("taf");
-    let forecast = thistaf.forecast;
+    let taf = feature.get("taf");
+    let forecast = taf.forecast;
     let outerhtml = `<div class="taftitle">` + 
                         `<label class="taftitlelabel">Terminal Area Forecast - ${feature.get("ident")}</label>` +
                     `</div>` +
@@ -724,63 +724,81 @@ function displayTafPopup(feature) {
                     `<br /><br />`;
 
     let html = "<div>";
-
-    Object.values(forecast).forEach((value) => {
-        html += "<p>";
-        let fromto = `<label class="tafsubheader">`;
-        Object.keys(value).forEach((key) => {
-            let subobj = value[key];
-            let fieldname = tafFieldKeymap.get(key);
-            switch (key) {
-                case "fcst_time_from":
-                    fromto += `<b>${subobj}</b>`;
-                    break;
-                case "fcst_time_to":
-                    fromto += `&nbsp&nbspto&nbsp&nbsp<b>${subobj}</b></label><br />`
-                    html += `<label class="fcstlabel">${fromto}</label><br />`;
-                    break;
-                case "change_indicator":
-                case "time_becoming":
-                case "probability":
-                case "wind_dir_degrees":
-                case "wind_speed_kt":
-                case "wind_gust_kt":
-                case "wind_shear_hgt_ft_agl":
-                case "wind_shear_dir_degrees":
-                case "wind_shear_speed_kt":
-                case "altim_in_hg":
-                case "vert_vis_ft":
-                case "wx_string":
-                    if (key === "wx_string") {
-                        let lineval = decodeWxDescriptions(subobj);
-                        html += `<label class="tafwxlabel">${fieldname}: <b>${lineval}</b></label><br />`;
-                    }
-                    else {
-                        html += `<label class="taflabel">${fieldname}: <b>${subobj}</b></label><br />`;
-                    }
-                    break;
-                case "sky_condition":
-                    html += `<label class="tafskyheader">${fieldname}</label><br />`;
-                    html += decodeSkyCondition(subobj);
-                    break;
-                case "turbulence_condition":
-                case "icing_condition":
-                    html += `<label class="tafskyheader">${fieldname}</label><br />`;
-                    html += decodeIcingCondition(subobj);
-                    break;
-                case "temperature":
-                    break;
-
+    
+    for (const item in forecast) {
+        let value = forecast[item];
+        if (typeof(value) === 'object') {
+            for (const subitem in value) {
+                let subvalue = value[subitem];
+                html += parseForecastField(subitem, subvalue);
             }
-        });
-        html += "</p><hr>";
-    });
+            html += "</p><hr>";
+        } 
+        else {
+            html += parseForecastField(item, value);
+        }
+    }
     html += "</div>";
-    html = outerhtml.replace("###", html);
+
+    console.log(html);
+    
+    let innerhtml = outerhtml.replace("###", html);
     popupcloser.style.left = "28px";
     popupcloser.style.top = "93%";
     popupcontent.style.padding = "0px";
-    popupcontent.innerHTML = html;
+    popupcontent.innerHTML = innerhtml;
+}
+
+function parseForecastField(rawfieldname, fieldvalue) {
+    let fieldname = tafFieldKeymap.get(rawfieldname);
+    let html = "";
+    let formattedvalue = "";
+    switch (rawfieldname) {
+        case "fcst_time_from":
+            let thistime = fieldvalue;
+            if (settings.uselocaltime) {
+                thistime = getLocalTime(fieldvalue);
+            }
+            html = `<label class="fcstlabel"><b>Starting at: ${thistime}</b></label></b><br />`;
+            break;
+        case "fcst_time_to": // I'm going to ignore this field to save space on the popup
+            //html = `&nbspto&nbsp<b>${fieldvalue}</b></label><br />`
+            //html = `<label class="fcstlabel">${formattedvalue}</label><br />`;
+            break;
+        case "change_indicator":
+        case "time_becoming":
+        case "probability":
+        case "wind_dir_degrees":
+        case "wind_speed_kt":
+        case "wind_gust_kt":
+        case "wind_shear_hgt_ft_agl":
+        case "wind_shear_dir_degrees":
+        case "wind_shear_speed_kt":
+        case "altim_in_hg":
+        case "vert_vis_ft":
+        case "wx_string":
+            if (fieldname === "wx_string") {
+                formattedvalue = decodeWxDescriptions(fieldvalue);
+                html = `<label class="tafwxlabel">${fieldname}: <b>${formattedvalue}</b></label><br />`;
+            }
+            else {
+                html = `<label class="taflabel">${fieldname}: <b>${fieldvalue}</b></label><br />`;
+            }
+            break;
+        case "sky_condition":
+            formattedvalue = decodeSkyCondition(fieldvalue);
+            html = `<label class="tafskyheader">${fieldname}</label><br />${formattedvalue}`;
+            break;
+        case "turbulence_condition":
+        case "icing_condition":
+            formattedvalue = decodeIcingCondition(fieldvalue);
+            html = `<label class="tafskyheader">${fieldname}</label><br />${formattedvalue}`;
+            break;
+        case "temperature":
+            break;
+
+    }
+    return html;
 }
 
 /**
@@ -788,9 +806,9 @@ function displayTafPopup(feature) {
  * @param {object} feature: the pirep the user clicked on
  */
  function displayPirepPopup(feature) {
-    let thispirep = feature.get("pirep");
+    let pirep = feature.get("pirep");
     let outerhtml = `<div class="taftitle">` + 
-                        `<label class="taftitlelabel">${thispirep.pirep_type} FROM AIRCRAFT: ${thispirep.aircraft_ref}</label><p></p>` +
+                        `<label class="taftitlelabel">${pirep.pirep_type} FROM AIRCRAFT: ${pirep.aircraft_ref}</label><p></p>` +
                     `</div>` +
                     `<div class="taf">` + 
                         `<pre><code>` +
@@ -802,22 +820,31 @@ function displayTafPopup(feature) {
                         `</code></pre>` +                 
                     `</div>` + 
                     `<br /><br />`;
-    let html = "<div>";
 
+    let html = "<div>";
     let pireplabel = `<label class="pirepitem">`
     let rawpirep = "";
-    Object.keys(thispirep).forEach((pirepkey) => {
-        let pirepvalue = thispirep[pirepkey];
+    let thistime = "";
+    Object.keys(pirep).forEach((pirepkey) => {
+        let pirepvalue = pirep[pirepkey];
         let fieldname = getFieldDescription(pirepkey);
         if (pirepkey.search("raw") > -1) {
             rawpirep = pirepvalue;
         }
         switch (pirepkey) {
             case "receipt_time":
-                html += `${pireplabel}${fieldname}: <b>${pirepvalue}</b></label><br />`;
+                thistime = pirepvalue;
+                if (settings.uselocaltime) {
+                    thistime = getLocalTime(pirepvalue);
+                }
+                html += `${pireplabel}${fieldname}: <b>${thistime}</b></label><br />`;
                 break;
             case "observation_time":
-                html += `${pireplabel}${fieldname}: <b>${pirepvalue}</b></label><br />`
+                thistime = pirepvalue;
+                if (settings.uselocaltime) {
+                    thistime = getLocalTime(pirepvalue);
+                }
+                html += `${pireplabel}${fieldname}: <b>${thistime}</b></label><br />`;
                 break;
             case "latitude":
             case "longitude":
@@ -871,11 +898,11 @@ function displayTafPopup(feature) {
         }
     });
     html += `</p><hr></div><textarea class="rawdata">${rawpirep}</textarea><br />`;
-    html = outerhtml.replace("###", html);
+    let innerhtml = outerhtml.replace("###", html);
     popupcloser.style.left = "28px";
     popupcloser.style.top = "93%";
     popupcontent.style.padding = "0px";
-    popupcontent.innerHTML = html;
+    popupcontent.innerHTML = innerhtml;
 }
 
 /**
@@ -1638,57 +1665,58 @@ function formatZuluDate(zuludate) {
  */
  function getLocalTime(zuludate) {
     let date = new Date(zuludate);
-    let time = date.toString();
-    let retval = time;
+    let hours = date.getHours();
+    let minutes = date.getMinutes();
+    let ampm = hours >= 12 ? 'PM' : 'AM';
+    let month = date.getMonth() + 1;
+    let day = date.getDate();
+    let year = date.getFullYear();
+    let tzone = "";
+
+    hours = hours % 12;
+    hours = hours ? hours : 12; // the hour '0' should be '12'
+    minutes = minutes < 10 ? '0'+minutes : minutes;
+
+    let timex = date.toString().split("GMT");
+    let time = timex[1];
+
     if (time.search("Eastern Standard") > -1) {
-        retval = time.replace("Eastern Standard Time", "EST");
-        return retval;
+        tzone = "(EST)"; //time.replace("Eastern Standard Time", "EST");
     }
     if (time.search("Eastern Daylignt") > -1) {
-        retval = time.replace("Eastern Standard Time", "EDT");
-        return retval;
+        tzone = "(EDT)"; //time.replace("Eastern Standard Time", "EDT");
     }
     if (time.search("Central Standard") > -1) {
-        retval = time.replace("Central Standard Time", "CST");
-        return retval;
+        tzone = "(CST)"; //time.replace("Central Standard Time", "CST");
     }
     if (time.search("Central Daylight") > -1) {
-        retval = time.replace("Eastern Standard Time", "CDT");
-        return retval;
+        tzone = "(CDT)"; //time.replace("Eastern Standard Time", "CDT");
     }
     if (time.search("Mountain Standard") > -1) {
-        retval = time.replace("Mountain Standard Time", "MST");
-        return retval;
+        tzone = "(MST)"; //time.replace("Mountain Standard Time", "MST");
     }
     if (time.search("Mountain Daylight") > -1) {
-        retval = time.replace("Eastern Standard Time", "MDT");
-        return retval;
+        tzone = "(MDT)"; //time.replace("Eastern Standard Time", "MDT");
     }
     if (time.search("Pacific Standard") > -1) {
-        retval = time.replace("Pacific Standard Time", "PST");
-        return retval;wxupdateintervalmsec
+        tzone = "(PST)"; //time.replace("Pacific Standard Time", "PST");
     }
     if (time.search("Pacific Daylight") > -1) {
-        retval = time.replace("Pacific Daylight Time", "PDT");
-        return retval;
+        tzone = "(PDT)"; //time.replace("Pacific Daylight Time", "PDT");
     }
     if (time.search("Alaska Standard") > -1) {
-        retval = time.replace("Alaska Standard Time", "AKST");
-        return retval;
+        tzone = "(AKST)"; //time.replace("Alaska Standard Time", "AKST");
     }
     if (time.search("Alaska Daylight") > -1) {
-        retval = time.replace("Alaska Daylight Time", "AKDT");
-        return retval;
+        tzone = "(AKDT)"; //time.replace("Alaska Daylight Time", "AKDT");
     }
     if (time.search("Atlantic Standard") > -1) {
-        retval = time.replace("Atlantic Standard Time", "AST");
-        return retval;
+        tzone = "(AST)"; //time.replace("Atlantic Standard Time", "AST");
     }
     if (time.search("Atlantic Daylight") > -1) {
-        retval = time.replace("Atlantic Daylight Time", "ADT");
-        return retval;
+        tzone = "(ADT)"; //time.replace("Atlantic Daylight Time", "ADT");
     }
-    return retval;
+    return `${month}-${day}-${year} ${hours}:${minutes} ${ampm} ${tzone}`;
 }
 
 /**
