@@ -6,7 +6,7 @@ const sqlite3 = require("sqlite3");
 const Math = require("math");
 const fs = require("fs");
 const http = require('http');
-const WebSocketServer = require('websocket').server;
+const { WebSocketServer } = require('ws');
 const XMLHttpRequest = require("xmlhttprequest").XMLHttpRequest;
 const { XMLParser } = require('fast-xml-parser');
 
@@ -53,8 +53,7 @@ const MessageTypes   = settings.messagetypes;
     let server = http.createServer(function (request, response) { });
     try {
         server.listen(settings.wsport, function () { });
-        
-        wss = new WebSocketServer({ httpServer: server });
+        wss = new WebSocketServer({ server });
         console.log(`Data forwarding server enabled at port ${settings.wsport}`); 
     }
     catch (error) {
@@ -62,15 +61,15 @@ const MessageTypes   = settings.messagetypes;
     }
 
     try {
-        wss.on('request', function (request) {
-            connection = request.accept(null, request.origin);
+        wss.on('connection', function connect(ws) {
+            connection = ws;
             console.log("new connection");
             runDownloads();
-            connection.on('close', () => {
+            connection.on('close', function() {
                 console.log("connection closed");
             });
-            connection.on('message', data => {
-                let message = JSON.parse(data.utf8Data);
+            connection.on('message', function(data) {
+                let message = JSON.parse(data);
                 if (message.type === MessageTypes.keepalive.type) {
                     console.log(message.payload);
                 }
@@ -81,13 +80,6 @@ const MessageTypes   = settings.messagetypes;
         console.log(error);
     }
 })();
-
-const airpdb = new sqlite3.Database(DB_AIRPORTS, sqlite3.OPEN_READONLY, (err) => {
-    if (err) {
-        console.log(`Failed to load: ${DB_AIRPORTS}`);
-        throw err;
-    }
-});
 
 const vfrdb = new sqlite3.Database(DB_SECTIONAL, sqlite3.OPEN_READONLY, (err) => {
     if (err) {
@@ -138,18 +130,24 @@ const histdb = new sqlite3.Database(DB_HISTORY, sqlite3.OPEN_READWRITE, (err) =>
 });
 
 function loadAirportsJson() {
+    const db = new sqlite3.Database(DB_AIRPORTS, sqlite3.OPEN_READONLY, (err) => {
+        if (err) {
+            console.log(`Failed to load: ${DB_AIRPORTS}`);
+            throw err;
+        }
+    });
     let msgtype = MessageTypes.airports.type;
         
     sql = `SELECT ident, type, name, elevation_ft, longitude_deg, latitude_deg, iso_region, countryname ` + 
             `FROM airports ` +
             `WHERE type NOT IN ('closed') ` +
             `ORDER BY iso_region ASC, name ASC;`;
-    
+
     let jsonout = {
         "airports": []
     };
-
-    airpdb.all(sql, (err, rows) => {
+    
+    db.all(sql, (err, rows) => {
         if (err == null) {
             rows.forEach(row => {
                 let thisrecord = {
@@ -181,6 +179,7 @@ function loadAirportsJson() {
             console.log(error.message);
         }
     });
+    db.close();
 }
 
 // express web server  
