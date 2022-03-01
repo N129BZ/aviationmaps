@@ -64,16 +64,20 @@ const MessageTypes   = settings.messagetypes;
         wss.on('connection', function connect(ws) {
             connection = ws;
             console.log("new connection");
+
             runDownloads();
+            
             connection.on('close', function() {
                 console.log("connection closed");
             });
+
             connection.on('message', function(data) {
                 let message = JSON.parse(data);
                 if (message.type === MessageTypes.keepalive.type) {
                     console.log(message.payload);
                 }
             });
+
         });
     }
     catch (error) {
@@ -258,14 +262,6 @@ try {
         res.writeHead(200);
         res.end();
     });
-
-    app.get("/getairports", (req, res) => {
-        setTimeout(() => {
-            loadAirportsJson();
-        }, 200);
-        res.writeHead(200);
-        res.end();
-    });
 }
 catch (error) {
     console.log(error);
@@ -391,12 +387,12 @@ function handleTilesets(request, response) {
         default:
             db = vfrdb;
             break;
-    }false
+    }
 
     db.all(sql, [], (err, rows) => {
-        rows.forEach(row => {
+        rows.forEach((row) => {
             if (row.value != null) {
-                meta[row.name] = `${row.value}`;
+                meta[row.name] = row.value;
             }
             if (row.name === "maxzoom" && row.value != null && !found) {
                 let maxZoomInt = parseInt(row.value); 
@@ -435,6 +431,10 @@ function tileToDegree(z, x, y) {
 }
 
 async function runDownloads() {
+    setTimeout(() => {
+        loadAirportsJson();
+    }, 200);
+
     setTimeout(() => { 
         downloadXmlFile(settings.messagetypes.metars); 
     }, 400);
