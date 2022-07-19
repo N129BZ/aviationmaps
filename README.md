@@ -10,56 +10,65 @@
 **User-editable values in settings.json:**
 ```
 {
-    "putpositionhistory": false,
-    "histintervalmsec": 15000,
-    "getgpsfromstratux": false,
-    "gpsintervalmsec": 1000,
-    "gettimedmetars": false,
-    "metarintervalmsec": 300000,
-    "httpport": 5000,
-    "wsport": 5050,
-    "startupzoom": 10,
-    "useOSMonlinemap": true,
-    "debug": true,
-    "sectionalDb": "Sectional.mbtiles",
-    "terminalDb": "Terminal.mbtiles",
-    "helicopterDb": "Helicopter.mbtiles",
-    "caribbeanDb": "Caribbean.mbtiles",
-    "gcanyonAoDb": "Grand_Canyon_AO.mbtiles",
-    "gcanyonGaDb": "Grand_Canyon_GA.mbtiles",
-    "historyDb": "positionhistory.db",
-    "airportsDb": "airports.db",
-    "stratuxurl": "http://192.168.10.1/getSituation",
-    "animatedwxurl": "https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0r-t.cgi",
-    "addswxurl": "https://www.aviationweather.gov/adds/dataserver_current/httpparam?dataSource=@SOURCE&requestType=retrieve&format=xml&hoursBeforeNow=1.5&mostRecentForEachStation=true&stationString=",
-    "addspirepsurl": "https://www.aviationweather.gov/adds/dataserver_current/httpparam?datasource=pireps&requesttype=retrieve&format=xml&hoursBeforeNow=.5",
-    "lockownshiptocenter": true,
-    "ownshipimage": "blueplane.png",
+    "appconfig": {
+        "savepositionhistory": false,
+        "histintervalmsec": 15000,
+        "gpsintervalmsec": 1000,
+        "wxupdateintervalmsec": 480000,
+        "keepaliveintervalmsec": 30000,
+        "httpport": 8080,
+        "wsport": 5050,
+        "startupzoom": 8,
+        "useOSMonlinemap": true,
+        "debug": false,
+        "osmofflineDb": "osm.mbtiles",
+        "sectionalDb": "Sectional.mbtiles",
+        "terminalDb": "Terminal.mbtiles",
+        "helicopterDb": "Helicopter.mbtiles",
+        "caribbeanDb": "Caribbean.mbtiles",
+        "gcanyonAoDb": "Grand_Canyon_AO.mbtiles",
+        "gcanyonGaDb": "Grand_Canyon_GA.mbtiles",
+        "historyDb": "positionhistory.db",
+        "uselocaltime": true,
+        "distanceunit": "sm", 
+        "usestratux": true,
+        "stratuxip": "192.168.1.187",
+        "stratuxsituationws": "ws://[stratuxip]/situation",
+        "stratuxtrafficws": "ws://[stratuxip]/traffic",
+        "animatedwxurl": "https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0r-t.cgi",
+        "addswxurl": "https://aviationweather.gov/adds/dataserver_current/httpparam?dataSource=###&requestType=retrieve&format=xml&hoursBeforeNow=1.5&mostRecentForEachStation=true&stationString=",
+        "addsurrentxmlurl": "https://aviationweather.gov/adds/dataserver_current/current/###.cache.xml",
+        "lockownshiptocenter": true,
+        "ownshipimage": "svgairplane-green-on-white.svg",
+        "trafficimage": "svgairplane-red-on-yellow.svg",
+        "firstrun": false,
+        "usemetricunits": false
+    },
+    "distanceunits": {
+        "kilometers": "km",
+        "nauticalmiles": "nm",
+        "statutemiles": "sm"
+    },
     "messagetypes": {
         "metars": {
-            "self": "metars",
-            "type": "METARS",
-            "token": "@SOURCE"
+            "type": "metars",
+            "token": "###"
         },
         "tafs": {
-            "self": "tafs",
-            "type": "TAFS",
-            "token": "@SOURCE"
+            "type": "tafs",
+            "token": "###"
         },
         "pireps": {
-            "self": "pireps",
-            "type": "PIREPS",
-            "token": ""
+            "type": "pireps",
+            "token": "###"
         },
         "airports": {
-            "self": "airports",
-            "type": "AIRPORTS",
+            "type": "airports",
             "token": ""
         },
-        "allairports": {
-            "self": "allairports",
-            "type": "ALLAIRPORTS",
-            "token": ""
+        "keepalive": {
+            "type": "keepalive",
+            "token": "((💜))"
         }
     }
 }
