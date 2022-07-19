@@ -5,13 +5,19 @@ const url = require('url');
 const sqlite3 = require("sqlite3");
 const Math = require("math");
 const fs = require("fs");
-const http = require('http');
-const { WebSocketServer } = require('ws');
+const WebSocket = require('ws');
 const XMLHttpRequest = require("xmlhttprequest").XMLHttpRequest;
 const { XMLParser } = require('fast-xml-parser');
+const lineReader = require('line-by-line');
 
+/**
+ * These objects are used by the XMLParser to convert XML to JSON.
+ * The alwaysArray object makes the parser translate sky_condition 
+ * XML attributes as an array of values... which is good.
+ */
 const alwaysArray = [
-    "response.data.METAR.sky_condition"
+    "response.data.METAR.sky_condition",
+    "response.data.PIREP.sky_condition"
 ];
 const xmlParseOptions = {
     ignoreAttributes : false,
@@ -22,182 +28,146 @@ const xmlParseOptions = {
         if( alwaysArray.indexOf(jpath) !== -1) return true;
     }
 };
+/**
+ * now the actual parser object is instantiated with the above options
+ */
 const xmlparser = new XMLParser(xmlParseOptions);
 
-let settings = {};
-let wss;
-let connection;
+/**
+ * Global variables
+ */
+let configuration = {};
+let airports = {};
+let MessageTypes = {}; 
 
+//let wss;
+let connections = new Map();
+let DB_PATH        = `${__dirname}/public/data`;
+let DB_SECTIONAL   = ""; 
+let DB_TERMINAL    = ""; 
+let DB_HELICOPTER  = ""; 
+let DB_CARIBBEAN   = ""; 
+let DB_GCANYONAO   = ""; 
+let DB_GCANYONGA   = ""; 
+let DB_HISTORY     = ""; 
+let DB_OSMOFFLINE  = ""; 
+
+/*
+ * First things first... load settings.json and airports.json 
+ * for immediate sending to client later upon winsock connection
+ */
 (() => {
     let rawdata = fs.readFileSync(`${__dirname}/settings.json`);
-    settings = JSON.parse(rawdata);
+    let jsonobject = JSON.parse(rawdata);
+    configuration  = jsonobject.appconfig;
+    MessageTypes   = jsonobject.messagetypes;
+    DB_SECTIONAL   = `${DB_PATH}/${configuration.sectionalDb}`;
+    DB_TERMINAL    = `${DB_PATH}/${configuration.terminalDb}`;
+    DB_HELICOPTER  = `${DB_PATH}/${configuration.helicopterDb}`;
+    DB_CARIBBEAN   = `${DB_PATH}/${configuration.caribbeanDb}`;
+    DB_GCANYONAO   = `${DB_PATH}/${configuration.gcanyonAoDb}`;
+    DB_GCANYONGA   = `${DB_PATH}/${configuration.gcanyonGaDb}`;
+    DB_HISTORY     = `${DB_PATH}/${configuration.historyDb}`;
+    DB_OSMOFFLINE  = `${DB_PATH}/${configuration.osmofflineDb}`;
+    
+    rawdata = fs.readFileSync(`${__dirname}/airports.json`);
+    airports = JSON.parse(rawdata);
 })();
 
-const DB_PATH        = `${__dirname}/public/data`;
-const DB_SECTIONAL   = `${DB_PATH}/${settings.sectionalDb}`;
-const DB_TERMINAL    = `${DB_PATH}/${settings.terminalDb}`;
-const DB_HELICOPTER  = `${DB_PATH}/${settings.helicopterDb}`;
-const DB_CARIBBEAN   = `${DB_PATH}/${settings.caribbeanDb}`;
-const DB_GCANYONAO   = `${DB_PATH}/${settings.gcanyonAoDb}`;
-const DB_GCANYONGA   = `${DB_PATH}/${settings.gcanyonGaDb}`;
-const DB_HISTORY     = `${DB_PATH}/${settings.historyDb}`;
-const DB_AIRPORTS    = `${DB_PATH}/${settings.airportsDb}`;
-const MessageTypes   = settings.messagetypes;
+/**
+ * THESE DATABASES ARE A TEMPORARY KLUDGE OF THE HIGHEST ORDER... 
+ */
+const vfrdb = new sqlite3.Database(DB_SECTIONAL, sqlite3.OPEN_READONLY, (err) => {
+    if (err) {
+        console.log(`Failed to load: ${DB_SECTIONAL}: ${err}`);
+        throw err;
+    }
+});
+const termdb = new sqlite3.Database(DB_TERMINAL, sqlite3.OPEN_READONLY, (err) => {
+    if (err) {
+        console.log(`Failed to load: ${DB_TERMINAL}: ${err}`);
+        throw err;
+    }
+});
+const helidb = new sqlite3.Database(DB_HELICOPTER, sqlite3.OPEN_READONLY, (err) => {
+    if (err) {
+        console.log(`Failed to load: ${DB_HELICOPTER}: ${err}`);
+        throw err;
+    }
+});
+const caribdb = new sqlite3.Database(DB_CARIBBEAN, sqlite3.OPEN_READONLY, (err) => {
+    if (err) {
+        console.log(`Failed to load: ${DB_CARIBBEAN}: ${err}`);
+        throw err;
+    }
+});
+const gcaodb = new sqlite3.Database(DB_GCANYONAO, sqlite3.OPEN_READONLY, (err) => {
+    if (err) {
+        console.log(`Failed to load: ${DB_GCANYONAO}: ${err}`);
+        throw err;
+    }
+});
+const gcgadb = new sqlite3.Database(DB_GCANYONGA, sqlite3.OPEN_READONLY, (err) => {
+    if (err) {
+        console.log(`Failed to load: ${DB_GCANYONGA}: ${err}`);
+        throw err;
+    }
+});
+const histdb = new sqlite3.Database(DB_HISTORY, sqlite3.OPEN_READWRITE, (err) => {
+    if (err){
+        console.log(`Failed to load: ${DB_HISTORY}: ${err}`);
+    }
+});
+const osmdb = new sqlite3.Database(DB_OSMOFFLINE, sqlite3.OPEN_READWRITE, (err) => {
+    if (err){
+        console.log(`Failed to load: ${DB_OSMOFFLINE}: ${err}`);
+    }
+});
+
+const wsServer = new WebSocket.Server({ noServer: true });
+wsServer.on('connection', socket => {
+    const id = Date.now();
+    connections.set(socket, id);
+    console.log(`Websocket connected, id: ${id}`);
+
+    setTimeout(() => {
+        let msg = {
+            type: "airports",
+            payload: JSON.stringify(airports)
+        };
+        socket.send(JSON.stringify(msg));
+        runDownloads();
+    }, 200);
+
+    socket.on('close', function() {
+        connections.delete(socket);
+        console.log("connection closed");
+    });
+    socket.on('message', (data) => { });
+});
 
 
 /**
- * 
+ * Start the express web server
  */
-(() => {
-    // http websocket server to forward weather data to page
-    let server = http.createServer(function (request, response) { });
-    try {
-        server.listen(settings.wsport, function () { });
-        wss = new WebSocketServer({ server });
-        console.log(`Data forwarding server enabled at port ${settings.wsport}`); 
-    }
-    catch (error) {
-        console.log(error);
-    }
-
-    try {
-        wss.on('connection', function connect(ws) {
-            connection = ws;
-            console.log("new connection");
-
-            runDownloads();
-            
-            connection.on('close', function() {
-                console.log("connection closed");
-            });
-
-            connection.on('message', function(data) {
-                let message = JSON.parse(data);
-                if (message.type === MessageTypes.keepalive.type) {
-                    console.log(message.payload);
-                }
-            });
-
-        });
-    }
-    catch (error) {
-        console.log(error);
-    }
-})();
-
-const vfrdb = new sqlite3.Database(DB_SECTIONAL, sqlite3.OPEN_READONLY, (err) => {
-    if (err) {
-        console.log(`Failed to load: ${DB_SECTIONAL}`);
-        throw err;
-    }
-});
-
-const termdb = new sqlite3.Database(DB_TERMINAL, sqlite3.OPEN_READONLY, (err) => {
-    if (err) {
-        console.log(`Failed to load: ${DB_TERMINAL}`);
-        throw err;
-    }
-});
-
-const helidb = new sqlite3.Database(DB_HELICOPTER, sqlite3.OPEN_READONLY, (err) => {
-    if (err) {
-        console.log(`Failed to load: ${DB_HELICOPTER}`);
-        throw err;
-    }
-});
-
-const caribdb = new sqlite3.Database(DB_CARIBBEAN, sqlite3.OPEN_READONLY, (err) => {
-    if (err) {
-        console.log(`Failed to load: ${DB_CARIBBEAN}`);
-        throw err;
-    }
-});
-
-const gcaodb = new sqlite3.Database(DB_GCANYONAO, sqlite3.OPEN_READONLY, (err) => {
-    if (err) {
-        console.log(`Failed to load: ${DB_GCANYONAO}`);
-        throw err;
-    }
-});
-
-const gcgadb = new sqlite3.Database(DB_GCANYONGA, sqlite3.OPEN_READONLY, (err) => {
-    if (err) {
-        console.log(`Failed to load: ${DB_GCANYONGA}`);
-        throw err;
-    }
-});
-
-const histdb = new sqlite3.Database(DB_HISTORY, sqlite3.OPEN_READWRITE, (err) => {
-    if (err){
-        console.log(`Failed to load: ${DB_HISTORY}`);
-    }
-});
-
-function loadAirportsJson() {
-    const db = new sqlite3.Database(DB_AIRPORTS, sqlite3.OPEN_READONLY, (err) => {
-        if (err) {
-            console.log(`Failed to load: ${DB_AIRPORTS}`);
-            throw err;
-        }
-    });
-    let msgtype = MessageTypes.airports.type;
-        
-    sql = `SELECT ident, type, name, elevation_ft, longitude_deg, latitude_deg, iso_region, countryname ` + 
-            `FROM airports ` +
-            `WHERE type NOT IN ('closed') ` +
-            `ORDER BY iso_region ASC, name ASC;`;
-
-    let jsonout = {
-        "airports": []
-    };
-    
-    db.all(sql, (err, rows) => {
-        if (err == null) {
-            rows.forEach(row => {
-                let thisrecord = {
-                    "ident": row.ident,
-                    "type": row.type,
-                    "name": row.name,
-                    "elev": row.elevation_ft,
-                    "lon": row.longitude_deg,
-                    "lat": row.latitude_deg,
-                    "isoregion": row.iso_region,
-                    "country": row.countryname
-                }
-                jsonout.airports.push(thisrecord);
-            });
-        }
-        else {
-            console.log(err);
-        }
-        let payload = JSON.stringify(jsonout);
-        let message = {
-            type: msgtype,
-            payload: payload
-        };
-        try {
-            let outstr = JSON.stringify(message);
-            connection.send(outstr);
-        }
-        catch(error) {
-            console.log(error.message);
-        }
-    });
-    db.close();
-}
-
-// express web server  
 let app = express();
+let server;
 try {
-        app.use(express.urlencoded({ extended: true }));
-        app.use(express.json({}));
-        app.use(cors());
-        app.use(favicon(`${__dirname }/images/favicon.png`));
-        app.use(express.static('public'))
-        app.listen(settings.httpport, () => {
-        console.log(`Webserver listening at port ${settings.httpport}`);
-    }); 
+    app.use(express.urlencoded({ extended: true }));
+    app.use(express.json({}));
+    app.use(cors());
+    app.use(favicon(`${__dirname }/images/favicon.png`));
+    app.use(express.static('public'))
+    console.log("Server listening...");
 
+    server = app.listen(configuration.httpport); 
+
+    server.on('upgrade', (request, socket, head) => {
+        wsServer.handleUpgrade(request, socket, head, socket => {
+            wsServer.emit('connection', socket, request);
+        });
+    });
+    
     let appOptions = {
         dotfiles: 'ignore',
         etag: false,
@@ -214,12 +184,16 @@ try {
 
     app.use(express.static(`${__dirname}/public`, appOptions));
     
-    app.get('/',(req, res) => {
+    app.get('/', (req, res) => {
         res.sendFile(`${__dirname}/public/index.html`);
     });
     
-    app.get("/getsettings", (req, res) => {
+    app.get("/appsettings", (req, res) => {
+        /**
+         * To ensure client gets any edits to settings, re-read the file
+         */
         let rawdata = fs.readFileSync(`${__dirname}/settings.json`);
+
         res.writeHead(200);
         res.write(rawdata);
         res.end();
@@ -229,27 +203,31 @@ try {
         handleTilesets(req, res);
     });    
 
-    app.get("/tiles/vfrsectile/*", (req, res) => {
+    app.get("/tiles/osm/*", (req, res) => {
+        handleTile(req, res, osmdb);
+    });
+
+    app.get("/tiles/sect/*", (req, res) => {
         handleTile(req, res, vfrdb);
     });
 
-    app.get("/tiles/termtile/*", (req, res) => {
+    app.get("/tiles/term/*", (req, res) => {
         handleTile(req, res, termdb);
     });
 
-    app.get("/tiles/helitile/*", (req, res) => {
+    app.get("/tiles/heli/*", (req, res) => {
         handleTile(req, res, helidb);
     });
 
-    app.get("/tiles/caribtile/*", (req, res) => {
+    app.get("/tiles/carib/*", (req, res) => {
         handleTile(req, res, caribdb);
     });
 
-    app.get("/tiles/gcaotile/*", (req, res) => {
+    app.get("/tiles/gcao/*", (req, res) => {
         handleTile(req, res, gcaodb);
     });
 
-    app.get("/tiles/gcgatile/*", (req, res) => {
+    app.get("/tiles/gcga/*", (req, res) => {
         handleTile(req, res, gcgadb);
     });
 
@@ -257,20 +235,24 @@ try {
         getPositionHistory(res);
     });
 
-    app.post("/puthistory", (req, res) => {
-        putPositionHistory(req.body);
+    app.post("/savehistory", (req, res) => {
+        savePositionHistory(req.body);
         res.writeHead(200);
         res.end();
     });
 }
-catch (error) {
-    console.log(error);
+catch (err) {
+    console.log(err);
 }
 
+/**
+ * Get the last recorded ownship position from the position history database
+ * @param {response} http response 
+ */
 function getPositionHistory(response) {
     let sql = "SELECT * FROM position_history WHERE id IN ( SELECT max( id ) FROM position_history )";
     histdb.get(sql, (err, row) => {
-        if (err == null) {
+        if (!err) {
             if (row != undefined) {
                 let obj = {};
                 obj["longitude"] = row.longitude;
@@ -283,25 +265,36 @@ function getPositionHistory(response) {
         }
         else
         {
+            console.log(err);
             response.writeHead(500);
             response.end();
         }
     });
 }
 
-function putPositionHistory(data) {
+/**
+ * Update the position history database with current position data
+ * @param {json object} data, contains date, longitude, latitude, heading, and altitude 
+ */
+function savePositionHistory(data) {
     let datetime = new Date().toISOString();
     let sql = `INSERT INTO position_history (datetime, longitude, latitude, heading, gpsaltitude) ` +
               `VALUES ('${datetime}', ${data.longitude}, ${data.latitude}, ${data.heading}, ${data.altitude})`;
-    console.log(sql); 
         
     histdb.run(sql, function(err) {
-        if (err != null) {
+        if (err) {
             console.log(err);
         }
     });
 }
 
+/**
+ * Parse the z,x,y integers, validate, and pass along to loadTile
+ * @param {request} http request 
+ * @param {response} http response 
+ * @param {db} database 
+ * @returns the results of calling loadTile
+ */
 function handleTile(request, response, db) {
     let x = 0;
     let y = 0;
@@ -318,7 +311,8 @@ function handleTile(request, response, db) {
         let yparts = parts[idx].split(".");
         y = parseInt(yparts[0])
 
-    } catch(err) {
+    } 
+    catch(err) {
         res.writeHead(500, "Failed to parse y");
         response.end();
         return;
@@ -332,11 +326,19 @@ function handleTile(request, response, db) {
     loadTile(z, x, y, response, db); 
 }
 
+/**
+ * Get all tiles from the passed database that match the supplied 
+ * z,x,y indices and then send them back to the requesting client   
+ * @param {integer} z 
+ * @param {integer} x 
+ * @param {integer} y 
+ * @param {http response} http response object 
+ * @param {database} sqlite database
+ */
 function loadTile(z, x, y, response, db) {
-
     let sql = `SELECT tile_data FROM tiles WHERE zoom_level=${z} AND tile_column=${x} AND tile_row=${y}`;
     db.get(sql, (err, row) => {
-        if (err == null) {
+        if (!err) {
             if (row == undefined) {
                 response.writeHead(200);
                 response.end();
@@ -351,12 +353,18 @@ function loadTile(z, x, y, response, db) {
             }
         }
         else {
+            console.log(err);
             response.writeHead(500, err.message);
             response.end();
         } 
     });
 }
 
+/**
+ * Get Z,X,Y tiles for the desired map from the associated mbtiles database
+ * @param {object} request 
+ * @param {object} response 
+ */
 function handleTilesets(request, response) {
     let sql = `SELECT name, value FROM metadata UNION SELECT 'minzoom', min(zoom_level) FROM tiles ` + 
               `WHERE NOT EXISTS (SELECT * FROM metadata WHERE name='minzoom') UNION SELECT 'maxzoom', max(zoom_level) FROM tiles ` +
@@ -368,9 +376,12 @@ function handleTilesets(request, response) {
 
     let parms = url.parse(request.url,true).query
     switch (parms.layer) {
+        case "osm":
+            db = osmdb;
+            break;
         case "term":
             db = termdb;
-            break;
+            break;include
         case "heli":
             db = helidb;
             break;
@@ -390,38 +401,50 @@ function handleTilesets(request, response) {
     }
 
     db.all(sql, [], (err, rows) => {
-        rows.forEach((row) => {
-            if (row.value != null) {
-                meta[row.name] = row.value;
-            }
-            if (row.name === "maxzoom" && row.value != null && !found) {
-                let maxZoomInt = parseInt(row.value); 
-                sql = `SELECT min(tile_column) as xmin, min(tile_row) as ymin, ` + 
-                             `max(tile_column) as xmax, max(tile_row) as ymax ` +
-                      `FROM tiles WHERE zoom_level=?`;
-                db.get(sql, [maxZoomInt], (err, row) => {
-                    let xmin = row.xmin;
-                    let ymin = row.ymin; 
-                    let xmax = row.xmax; 
-                    let ymax = row.ymax;  
-                    
-                    llmin = tileToDegree(maxZoomInt, xmin, ymin);
-                    llmax = tileToDegree(maxZoomInt, xmax+1, ymax+1);
-                    
-                    retarray = `${llmin[0]}, ${llmin[1]}, ${llmax[0]}, ${llmax[1]}`;
-                    meta["bounds"] = retarray;
-                    let output = JSON.stringify(meta);
-                    found = true;
-                    response.writeHead(200);
-                    response.write(output);
-                    response.end();
-                    return;
-                });
-            }
-        });
+        if (!err) {
+            rows.forEach((row) => {
+                if (row.value != null) {
+                    meta[row.name] = row.value;
+                }
+                if (row.name === "maxzoom" && row.value != null && !found) {
+                    let maxZoomInt = parseInt(row.value); 
+                    sql = `SELECT min(tile_column) as xmin, min(tile_row) as ymin, ` + 
+                                 `max(tile_column) as xmax, max(tile_row) as ymax ` +
+                        `FROM tiles WHERE zoom_level=?`;
+                    db.get(sql, [maxZoomInt], (err, row) => {
+                        let xmin = row.xmin;
+                        let ymin = row.ymin; 
+                        let xmax = row.xmax; 
+                        let ymax = row.ymax;  
+                        
+                        llmin = tileToDegree(maxZoomInt, xmin, ymin);
+                        llmax = tileToDegree(maxZoomInt, xmax+1, ymax+1);
+                        
+                        retarray = `${llmin[0]}, ${llmin[1]}, ${llmax[0]}, ${llmax[1]}`;
+                        meta["bounds"] = retarray;
+                        let output = JSON.stringify(meta);
+                        found = true;
+                        response.writeHead(200);
+                        response.write(output);
+                        response.end();
+                        return;
+                    });
+                }
+            });
+        }
+        else {
+            console.log(err);
+        }
     });
 }
 
+/**
+ * Get the longitude and latitude for a given pixel position on the map
+ * @param {integer} z - the zoom level 
+ * @param {integer} x - the horizontal index
+ * @param {integer} y - the vertical index
+ * @returns 2 element array - [longitude, latitude]
+ */
 function tileToDegree(z, x, y) {
 	y = (1 << z) - y - 1
     let n = Math.PI - 2.0*Math.PI*y/Math.pow(2, z);
@@ -430,27 +453,26 @@ function tileToDegree(z, x, y) {
     return [lon, lat]
 }
 
+/**
+ * Recursively run the file downloads from the ADDS server for 
+ * metars, tafs, & pireps which will then be sent to client(s)
+ */
 async function runDownloads() {
+    downloadXmlFile(MessageTypes.metars);
+    downloadXmlFile(MessageTypes.tafs); 
+    downloadXmlFile(MessageTypes.pireps);
     setTimeout(() => {
-        loadAirportsJson();
-    }, 200);
-
-    setTimeout(() => { 
-        downloadXmlFile(settings.messagetypes.metars); 
-    }, 400);
-
-    setTimeout(() => { 
-        downloadXmlFile(settings.messagetypes.tafs); 
-    }, 800);
-
-    setTimeout(() => { 
-        downloadXmlFile(settings.messagetypes.pireps); 
-    }, 1200);
+        runDownloads();
+    }, configuration.wxupdateintervalmsec);
 }
 
+/**
+ * Download an ADDS weather service file
+ * @param {source} the type of file to download (metar, taf, or pirep)
+ */
 async function downloadXmlFile(source) {
     let xhr = new XMLHttpRequest();  
-    let url = settings.addsurrentxmlurl.replace(source.token, source.type);
+    let url = configuration.addsurrentxmlurl.replace(source.token, source.type);
     xhr.open('GET', url, true);
     xhr.setRequestHeader('Content-Type', 'text/csv');
     xhr.setRequestHeader("Access-Control-Allow-Origin", "*");
@@ -458,31 +480,39 @@ async function downloadXmlFile(source) {
     xhr.setRequestHeader("Access-Control-Allow-Headers", "*");
     xhr.responseType = 'document';
     xhr.onload = () => {
-        if (xhr.readyState == 4 && xhr.status == 200) {
-            let response = xhr.responseText;
-            //fs.writeFileSync(`${DB_PATH}/${source.type}.xml`, response);
-            let messageJSON = xmlparser.parse(response);
-            switch(source.type) {
-                case "tafs":
-                    processTafJsonObjects(messageJSON);
-                    break;
-                case "metars":
-                    processMetarJsonObjects(messageJSON);
-                    break;
-                case "pireps":
-                    processPirepJsonObjects(messageJSON);
-                    break;
+        try {
+            if (xhr.readyState == 4 && xhr.status == 200) {
+                let response = xhr.responseText;
+                let messageJSON = xmlparser.parse(response);
+                switch(source.type) {
+                    case "tafs":
+                        processTafJsonObjects(messageJSON);
+                        break;
+                    case "metars":
+                        processMetarJsonObjects(messageJSON);
+                        break;
+                    case "pireps":
+                        processPirepJsonObjects(messageJSON);
+                        break;
+                }
             }
+        }
+        catch (err) {
+            console.log(`xhr.onload error: ${err}`);
         }
     };
     try { 
         xhr.send();
     }
-    catch (error) {
-        console.log(`Error getting message type ${xmlmessage.type}: ${error}`);
+    catch (err) {
+        console.log(`Error getting message type ${xmlmessage.type}: ${err}`);
     }
 }
 
+/**
+ * Process the received downloaded tafs data and send to client(s)
+ * @param {object} tafs json object 
+ */
 async function processTafJsonObjects(tafs) {
     let payload = JSON.stringify(tafs); 
     let message = {
@@ -490,9 +520,13 @@ async function processTafJsonObjects(tafs) {
         payload: payload
     };
     const json = JSON.stringify(message);
-    connection.send(json);
+    sendMessageToClients(json);
 }
 
+/**
+ * Process the received downloaded metars data and send to client(s)
+ * @param {object} metars json object 
+ */
 async function processMetarJsonObjects(metars) {
     let payload = JSON.stringify(metars);
     let message = {
@@ -500,9 +534,13 @@ async function processMetarJsonObjects(metars) {
         payload: payload
     };
     const json = JSON.stringify(message);
-    connection.send(json);
+    sendMessageToClients(json);
 }
 
+/**
+ * Process the received downloaded pireps data and send to client(s)
+ * @param {object} pireps json object 
+ */
 async function processPirepJsonObjects(pireps) {
     let payload = JSON.stringify(pireps);
     let message = {
@@ -510,5 +548,62 @@ async function processPirepJsonObjects(pireps) {
         payload: payload
     }
     const json = JSON.stringify(message);
-    connection.send(json);
+    sendMessageToClients(json);
+}
+
+/**
+ * Iterate through any/all connected clients and send data
+ * @param {string} stringified json message 
+ */
+async function sendMessageToClients(message) {
+    [...connections.keys()].forEach((client) => {
+        client.send(message);
+    });
+}
+
+function DebugPlayback() {
+
+    if (inPlayback) {
+        return;
+    }
+
+    inPlayback = true;
+
+    var lr = new lineReader(__dirname + "/playback.txt");
+    
+    lr.on('error', function (err) {
+        console.log(err); 
+    });
+
+    lr.on('line', function (line) {
+        
+        // pause emitting of lines...
+        lr.pause();
+
+        if (stopPlayback) {
+            inPlayback = false;
+            stopPlayback = false;
+            lr.close();
+            return;
+        }
+
+        // ...do asynchronous line processing..
+        setTimeout(function () {    
+            if (line.substring(0, 1) == "!") {
+                let payload = "!" + line.substring(1);
+                let message = {
+                    type: MessageTypes.serialdata.type,
+                    payload: payload
+                }
+                sendMessageToClients(message);
+            }
+            lr.resume();
+        }, 150);
+    });
+
+    lr.on('end', function () {
+        inPlayback = false;
+        lr.close();
+        stopPlayback = false;
+    });
 }

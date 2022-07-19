@@ -1,0 +1,18 @@
+{
+  "view" : "Kivic",
+  "wsport": 5056,
+  "serialPort" : "/dev/ttyACM0",
+  "baudrate": 9600,
+  "vne": 160,
+  "vno": 130,
+  "vs1": 48,
+  "vs0": 44,
+  "stratuxip": "192.168.1.187",
+  "trafficwarnings": true,
+  "maxwarnaltitude": 8000,
+  "maxwarndistance": 15,
+  "speedstyle" : "MPH",
+  "ahrs" : "Dynon",
+  "debug": true,
+  "firstrun": false
+}

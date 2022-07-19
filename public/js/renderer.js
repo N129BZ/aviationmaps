@@ -1,32 +1,29 @@
 'use strict';
 
-/**
+ /**
  * Construct all of the application urls 
  */
- let URL_LOCATION            =  location.hostname;
- let URL_PROTOCOL            =  location.protocol;
- let URL_PORT                =  location.port;          
- let URL_HOST_BASE           =  URL_LOCATION;
- if (parseInt(URL_PORT) > 0) {
-     URL_HOST_BASE += `:${URL_PORT}`;
- }
- let URL_HOST_PROTOCOL       = `${URL_PROTOCOL}//`;
- let URL_SERVER              = `${URL_HOST_PROTOCOL}${URL_HOST_BASE}`;
- let URL_WINSOCK             = `ws://${URL_LOCATION}:`;
- let URL_GET_TILESETS        = `${URL_SERVER}/tiles/tilesets`;
- let URL_GET_VFRSEC_TILE     = `${URL_SERVER}/tiles/vfrsectile/{z}/{x}/{-y}.png`;
- let URL_GET_TERM_TILE       = `${URL_SERVER}/tiles/termtile/{z}/{x}/{-y}.png`;
- let URL_GET_HELI_TILE       = `${URL_SERVER}/tiles/helitile/{z}/{x}/{-y}.png`;
- let URL_GET_CARIB_TILE      = `${URL_SERVER}/tiles/caribtile/{z}/{x}/{-y}.png`;
- let URL_GET_GCAO_TILE       = `${URL_SERVER}/tiles/gcaotile/{z}/{x}/{-y}.png`;
- let URL_GET_GCGA_TILE       = `${URL_SERVER}/tiles/gcgatile/{z}/{x}/{-y}.png`;
- let URL_GET_HISTORY         = `${URL_SERVER}/gethistory`;
- let URL_GET_SETTINGS        = `${URL_SERVER}/getsettings`;
- let URL_PUT_HISTORY         = `${URL_SERVER}/puthistory`;
- let URL_GET_AIRPORTS        = `${URL_SERVER}/getairports`;
- let URL_GET_HELIPORTS       = `${URL_SERVER}/getheliports`;
+let URL_LOCATION            =  location.hostname;
+let URL_PROTOCOL            =  location.protocol;
+let URL_PORT                =  location.port;
+let URL_HOST_BASE           =  URL_LOCATION;
+if (parseInt(URL_PORT) > 0) {
+    URL_HOST_BASE += `:${URL_PORT}`;
+}
+let URL_HOST_PROTOCOL       = `${URL_PROTOCOL}//`;
+let URL_SERVER              = `${URL_HOST_PROTOCOL}${URL_HOST_BASE}`;
+let URL_WINSOCK             = `ws://${URL_LOCATION}:${URL_PORT}`;
+let URL_GET_TILESETS        = `${URL_SERVER}/tiles/tilesets`;
+let URL_GET_TILE            = `${URL_SERVER}/tiles/[tilesetname]/{z}/{x}/{-y}.png`;
+let URL_GET_HISTORY         = `${URL_SERVER}/gethistory`;
+let URL_GET_SETTINGS        = `${URL_SERVER}/appsettings`;
+let URL_PUT_HISTORY         = `${URL_SERVER}/savehistory`;
+let URL_GET_HELIPORTS       = `${URL_SERVER}/getheliports`;
 
-//Metar Object
+
+/**
+ * Classes used by the on-the-fly weather SVG in metar popups
+ */
 class METAR {
     /**
      * Extracted Metar data in a human readable format.
@@ -49,35 +46,58 @@ class METAR {
         }
     }
 }
-
 class Wind {
     direction = 0;
     speed = 0;
     unit = "";
     constructor() {}
 };
-
 class Variation {
-    constructor() {
-    }
+    constructor() {}
 };
-
 class Cloud {
-    constructor() {
+    constructor() {}
+};
+class TrafficItem {
+    points = [];
+    data = {};
+
+    constructor(key, jsondata) {
+        this.key = key;
+        this.data = jsondata;
+        let geometry = new ol.geom.Point(ol.proj.fromLonLat([jsondata.Lng, jsondata.Lat]));
+        this.points.push(geometry);
+    }
+    
+    updateData(jsondata) {
+        this.data = jsondata;
     }
 
-};
+    addPoint(geometry) {
+        this.points.push(geometry);
+    }
+
+    * getPoint(){
+        for (let geometry in this.points) {
+            yield(geometry);
+        }
+    }
+}
+/**************** END OF SVG GENERATION CLASSES *****************/
 
 /**
- * global properties
+ * global variables
  */
-let settings = {};
+let configuration = {};
 let last_longitude = 0;
 let last_latitude = 0;
 let last_heading = 0;
-let currentZoom = 9;
+let currentZoom = 9.0;
 let lastcriteria = "allregions";
 
+/**
+ * Map objects used for various keyname lookups
+ */
 let airportNameKeymap = new Map();
 let tafFieldKeymap = new Map();
 let metarFieldKeymap = new Map();
@@ -85,7 +105,10 @@ let weatherAcronymKeymap = new Map();
 let icingCodeKeymap = new Map();
 let turbulenceCodeKeymap = new Map();
 let skyConditionKeymap = new Map();
+let trafficMap = new Map();
 
+
+/*******keymap loading ******/
 loadTafFieldKeymap();
 loadMetarFieldKeymap();
 loadWeatherAcronymKeymap();
@@ -98,9 +121,12 @@ loadSkyConditionmKeymap();
  * metars, tafs, airport info, etc.
  */
 let metarFeatures = new ol.Collection();
+let metarMarkers = [];
 let airportFeatures = new ol.Collection();
 let tafFeatures = new ol.Collection();
 let pirepFeatures = new ol.Collection();
+let trafficFeatures = new ol.Collection();
+//let trafficLines = new ol.Collection();
 
 /**
  * Vector sources
@@ -109,7 +135,7 @@ let metarVectorSource;
 let airportVectorSource;
 let tafVectorSource;
 let pirepVectorSource;
-let ownshipVectorSource;
+let trafficVectorSource;
 let animatedWxTileSource;
 
 /**
@@ -119,11 +145,13 @@ let airportVectorLayer;
 let metarVectorLayer;
 let tafVectorLayer;
 let pirepVectorLayer;
+let trafficVectorLayer;
 
 /**
  * Tile layers
  */
-let osmTileLayer;
+let osmOnlineTileLayer;
+let osmOfflineTileLayer;
 let sectionalTileLayer;
 let terminalTileLayer;
 let helicopterTileLayer;
@@ -134,11 +162,13 @@ let animatedWxTileLayer;
 let debugTileLayer;  
 
 /**
- * Websocket object, flag, and message definition
- * JSON object that is filled by returned settingsws://${window.location.hostname}
+ * Websocket objects, flag, and message definition
+ * JSON object that is filled by returned settings
  */
-let websock;
-let wsOpen = false;
+let wsSituation;
+let wsTraffic;
+let wsClient;
+let wsServerOpen = false;
 let MessageTypes = {};
 let DistanceUnits = {};
 let distanceunit = "";
@@ -159,7 +189,7 @@ const regionselect = document.getElementById("regionselect");
 let regionmap = new Map();
 
 /** 
- * Request settings JSON object from serverself
+ * Request settings JSON object from server
  */
  $.get({
     async: false,
@@ -167,11 +197,12 @@ let regionmap = new Map();
     url: URL_GET_SETTINGS,
     success: (data) => {
         try {
-            settings = JSON.parse(data);
-            MessageTypes = settings.messagetypes;
-            DistanceUnits = settings.distanceunits;
-            distanceunit = settings.distanceunit;
-            currentZoom = settings.startupzoom;
+            let jsondata = JSON.parse(data);
+            configuration = jsondata.appconfig;
+            MessageTypes = jsondata.messagetypes;
+            DistanceUnits = jsondata.distanceunits;
+            distanceunit = configuration.distanceunit;
+            currentZoom = configuration.startupzoom;
         }
         catch(err) {
             console.log(err);
@@ -208,16 +239,16 @@ let regionmap = new Map();
 });
 
 /**
- * JQuery method to immediately initialize the websocket connection
+ * Setup WebSock client
  */
  $(() => { 
     try {
-        let wsurl = `${URL_WINSOCK}${settings.wsport}`;
-        console.log(`OPENING: ${wsurl}`);
-        websock = new WebSocket(wsurl);
-        websock.onmessage = (evt) => {
+        console.log(`OPENING: ${URL_WINSOCK}`);
+        wsClient = new WebSocket(URL_WINSOCK);
+        wsClient.onmessage = (evt) => {
             let message = JSON.parse(evt.data);
-            let payload = JSON.parse(message.payload); 
+            let payload = JSON.parse(message.payload);
+
             switch (message.type) {
                 case MessageTypes.airports.type:
                     processAirports(payload);
@@ -234,31 +265,82 @@ let regionmap = new Map();
             }
         }
 
-        websock.onerror = function(evt){
+        wsClient.onerror = function(evt){
             console.log("Websocket ERROR: " + evt.data);
         }
         
-        websock.onopen = function(evt) {
+        wsClient.onopen = function(evt) {
             console.log("Websocket CONNECTED.");
-            wsOpen = true;
+            wsServerOpen = true;
             keepAlive();
         }
         
-        websock.onclose = function(evt) {
+        wsClient.onclose = function(evt) {
             cancelKeepAlive();
-            wsOpen = false;
+            wsServerOpen = false;
             console.log("Websocket CLOSED.");
         }
     }
     catch (error) {
         console.log(error);
     }
+    
+    if (configuration.usestratux) {
+        setupStratuxWebsockets();
+    }
 });
+
+function setupStratuxWebsockets() {
+    let sip = configuration.stratuxip;
+    
+    let wsturl = configuration.stratuxtrafficws.replace("[stratuxip]", sip);
+    wsTraffic = new WebSocket(wsturl);
+    wsTraffic.onmessage = function(evt){
+        let tdata = JSON.parse(evt.data);
+        addTrafficObject(tdata);
+    }
+
+    let wssurl = configuration.stratuxsituationws.replace("[stratuxip]", sip);
+    wsSituation = new WebSocket(wssurl);
+    wsSituation.onmessage = function(evt){
+        let sdata = JSON.parse(evt.data);
+        setOwnshipOrientation(sdata);
+    }
+
+    setInterval(checkForStaleTraffic, 10000);
+}
+
+/**
+ * Add a qualified Traffic item to the traffic Map collection
+ * @param {json object} jsondata 
+ */
+function addTrafficObject(jsondata) {
+    let key = jsondata.Icao_addr;
+    if (jsondata.AgeLastAlt < 50 && jsondata.Speed > 0) {
+        let traffic;
+        if (trafficMap.has(key)) {
+            traffic = trafficMap.get(key);
+            traffic.updateData(jsondata);
+            if (jsondata.Lng !== 0 && jsondata.Lat !== 0) {
+                traffic.addPoint(new ol.geom.Point(ol.proj.fromLonLat([jsondata.Lng, jsondata.Lat])));
+            }
+        }
+        else {
+            traffic = new TrafficItem(key, jsondata);
+            trafficMap.set(key, traffic);
+        }
+        console.log(traffic.data);
+        processTraffic();
+    }
+    else {
+        trafficMap.delete(key);
+    }
+}
 
 /**
  * Icon markers for different METAR categories 
  */
- let ifrMarker = new ol.style.Icon({
+let ifrMarker = new ol.style.Icon({
     crossOrigin: 'anonymous',
     src: `${URL_SERVER}/img/ifr.png`,
     size: [55, 55],
@@ -295,54 +377,15 @@ let vfrMarker = new ol.style.Icon({
 });
 
 /**
- * Icon markers for different PIREP weather categories
- */
-let ifrPirep = new ol.style.Icon({
-    crossOrigin: 'anonymous',
-    src: `${URL_SERVER}/img/ifrpirep.png`,
-    size: [85, 85],
-    offset: [0, 0],
-    opacity: 1,
-    scale: .50
-});
-/*--------------------------------------*/
-let lifrPirep = new ol.style.Icon({
-    crossOrigin: 'anonymous',
-    src: `${URL_SERVER}/img/lifrpirep.png`,
-    size: [85, 85],
-    offset: [0, 0],
-    opacity: 1,
-    scale: .50
-});
-/*--------------------------------------*/
-let mvfrPirep = new ol.style.Icon({
-    crossOrigin: 'anonymous',
-    src: `${URL_SERVER}/img/mvfrpirep.png`,
-    size: [85, 85],
-    offset: [0, 0],
-    opacity: 1,
-    scale: .50
-});
-/*--------------------------------------*/
-let vfrPirep = new ol.style.Icon({
-    crossOrigin: 'anonymous',
-    src: `${URL_SERVER}/img/vfrpirep.png`,
-    size: [85, 85],
-    offset: [0, 0],
-    opacity: 1,
-    scale: .50
-});
-
-/**
  * Icon markers for airports, TAFs, heliports, etc.
  */
 let tafMarker = new ol.style.Icon({
     crossOrigin: 'anonymous',
-    src: `${URL_SERVER}/img/taf.png`,
-    size: [85, 85],
+    src: `${URL_SERVER}/img/taf.svg`,
+    size: [126, 90],
     offset: [0, 0],
     opacity: 1,
-    scale: .50
+    scale: .25
 });
 /*--------------------------------------*/
 let airportMarker = new ol.style.Icon({
@@ -420,22 +463,24 @@ function processAirports(jsonobj) {
             else {
                 isoregions.set(country, country);
             }
-            let airportmarker = new ol.Feature({
+            let airportFeature = new ol.Feature({
                 ident: airport.ident,
                 type: airport.type,
+                datatype: "airport",
                 isoregion: isoregion,
                 country: country,
                 geometry: new ol.geom.Point(ol.proj.fromLonLat([lon, lat]))
             });
-            airportmarker.setId(airport.ident);
+            airportFeature.setId(airport.ident);
             if (airport.type === "heliport") {
-                airportmarker.setStyle(heliportStyle);
+                airportFeature.setStyle(heliportStyle);
             }
             else {
-                airportmarker.setStyle(airportStyle);
+                airportFeature.setStyle(airportStyle);
             }
-            airportFeatures.push(airportmarker);
+            airportFeatures.push(airportFeature);
             airportNameKeymap.set(airport.ident, airport.name);
+            airportFeature.changed();
         }
 
         /**
@@ -504,17 +549,13 @@ function selectFeaturesByCriteria() {
 }
 
 /**
- * Heartbeat routine to keep websocket "hot"
+ * Websocket heartbeat
  */
 let timerId = 0;
-const kamessage = {
-    type: MessageTypes.keepalive.type,
-    payload: MessageTypes.keepalive.token
-}
 function keepAlive() { 
-    var timeout = settings.keepaliveintervalmsec;  
-    if (wsOpen) {  
-        websock.send(JSON.stringify(kamessage));  
+    var timeout = configuration.keepaliveintervalmsec;  
+    if (wsServerOpen) {  
+        wsClient.send(Date.now());  
     }  
     timerId = setTimeout(keepAlive, timeout);  
 }  
@@ -551,7 +592,7 @@ function closePopup() {
  */
 let airplaneElement = document.getElementById('airplane');
 airplaneElement.style.transform = "rotate(" + last_heading + "deg)";
-airplaneElement.src = `img/${settings.ownshipimage}`;
+airplaneElement.src = `img/${configuration.ownshipimage}`;
 airplaneElement.addEventListener("mouseover", (event) => {
     console.log("MY AIRPLANE!!")
 });
@@ -584,8 +625,10 @@ const map = new ol.Map({
     target: 'map',
     view: new ol.View({
         center: viewposition,        
-        zoom: settings.startupzoom,
-        enableRotation: false
+        zoom: configuration.startupzoom,
+        enableRotation: false,
+        minZoom: 1,
+        maxZoom: 22
     }),
     controls: ol.control.defaults().extend([scaleLine]),
     overlays: [popupoverlay]
@@ -604,21 +647,43 @@ map.addOverlay(myairplane);
 /**
  * Event to handle scaling of feature images
  */
-map.on('pointermove', (evt) => {
-    //let hasfeature = false;
-    let someZoom = map.getView().getZoom();
+map.on('moveend', function(e) {
+    let newZoom = map.getView().getZoom();
     let inAnimation = false;
-    if (currentZoom !== someZoom) {
-        currentZoom = someZoom;
+    if (currentZoom != newZoom) {
         if (animationId !== null) {
             inAnimation = true;
             stopWeatherRadar();
         }
-        resizeDots();
+        resizeDots(newZoom);
+        currentZoom = newZoom;
         closePopup();
         if (inAnimation) {
             playWeatherRadar();
         }
+    }
+});
+
+let ontraffic = false;
+map.on('pointermove', (evt) => {
+    let hasfeature = false;
+    let coords = ol.proj.toLonLat(evt.coordinate);
+    map.forEachFeatureAtPixel(evt.pixel, (feature) => {
+        if (feature) {
+            hasfeature = true;
+            let datatype = feature.get("datatype");
+            if (datatype === "traffic") {
+                ontraffic = true;
+                displayTrafficPopup(feature);
+                let coordinate = evt.coordinate;
+                popupoverlay.setPosition(coordinate);
+            }
+        }
+    });
+
+    if (!hasfeature && ontraffic == true) {
+        ontraffic = false;
+        closePopup();
     }
 });
 
@@ -627,8 +692,8 @@ map.on('pointermove', (evt) => {
  */
 map.on('click', (evt) => {
     let hasfeature = false;
-    currentZoom = map.getView().getZoom();
-    resizeDots();
+    let coords = ol.proj.toLonLat(evt.coordinate);
+    
     map.forEachFeatureAtPixel(evt.pixel, (feature) => {
         if (feature) {
             hasfeature = true;
@@ -642,7 +707,7 @@ map.on('click', (evt) => {
             else if (datatype === "pirep") {
                 displayPirepPopup(feature);
             }
-            else { // simple airport marker
+            else if (datatype === "airport") { // simple airport marker
                 displayAirportPopup(feature);
             }
             let coordinate = evt.coordinate;
@@ -668,7 +733,7 @@ map.on('click', (evt) => {
         cat = "VFR";
     }
     let time = metar.observation_time;
-    if (settings.uselocaltime) {
+    if (configuration.uselocaltime) {
         time = getLocalTime(time);
     }
     let tempC = metar.temp_c;
@@ -769,13 +834,18 @@ function displayTafPopup(feature) {
         }
     }
     
-    console.log(html);
     html += `</p></div><textarea class="rawdata">${rawtaf}</textarea><br />`;
     html += `<p><button class="ol-popup-closer" onclick="closePopup()">close</button></p></div>`;
     let innerhtml = outerhtml.replace("###", html);
     popupcontent.innerHTML = innerhtml;
 }
 
+/**
+ * Parse forcast fields from metars or tafs
+ * @param {string} rawfieldname - the object key before "cleaning" underscores, etc.
+ * @param {object} fieldvalue json object corresponding to the key
+ * @returns 
+ */
 function parseForecastField(rawfieldname, fieldvalue) {
     let fieldname = tafFieldKeymap.get(rawfieldname);
     let html = "";
@@ -783,23 +853,25 @@ function parseForecastField(rawfieldname, fieldvalue) {
     switch (rawfieldname) {
         case "fcst_time_from":
             let thistime = fieldvalue;
-            if (settings.uselocaltime) {
+            if (configuration.uselocaltime) {
                 thistime = getLocalTime(fieldvalue);
             }
-            html = `<label class="fcstlabel"><b>From: ${thistime}</b></label></b><br />`;
+            html = `<label class="fcstlabel"><b>${thistime}</b></label></b><br />`;
             break;
         case "fcst_time_to": // I'm going to ignore this field to save space on the popup
             //html = `&nbspto&nbsp<b>${fieldvalue}</b></label><br />`
             //html = `<label class="fcstlabel">${formattedvalue}</label><br />`;
             break;
         case "change_indicator":
+            let changevalue = getWeatherAcronymDescription(fieldvalue);
+            html = `<label class="taflabel">${fieldname}: <b>${changevalue}</b></label><br />`;
+            break;
+        case "temperature":
         case "time_becoming":
         case "probability":
-        case "wind_dir_degrees":
         case "wind_speed_kt":
         case "wind_gust_kt":
         case "wind_shear_hgt_ft_agl":
-        case "wind_shear_dir_degrees":
         case "wind_shear_speed_kt":
         case "altim_in_hg":
         case "vert_vis_ft":
@@ -821,7 +893,9 @@ function parseForecastField(rawfieldname, fieldvalue) {
             formattedvalue = decodeIcingCondition(fieldvalue);
             html = `<label class="tafskyheader">${fieldname}</label><br />${formattedvalue}`;
             break;
-        case "temperature":
+        case "wind_dir_degrees":
+        case "wind_shear_dir_degrees":
+            html = `<label class="taflabel">${fieldname}: <b>${fieldvalue} Degrees</b></label><br />`;
             break;
 
     }
@@ -858,14 +932,14 @@ function parseForecastField(rawfieldname, fieldvalue) {
         switch (pirepkey) {
             case "receipt_time":
                 thistime = pirepvalue;
-                if (settings.uselocaltime) {
+                if (configuration.uselocaltime) {
                     thistime = getLocalTime(pirepvalue);
                 }
                 html += `${pireplabel}${fieldname}: <b>${thistime}</b></label><br />`;
                 break;
             case "observation_time":
                 thistime = pirepvalue;
-                if (settings.uselocaltime) {
+                if (configuration.uselocaltime) {
                     thistime = getLocalTime(pirepvalue);
                 }
                 html += `${pireplabel}${fieldname}: <b>${thistime}</b></label><br />`;
@@ -879,14 +953,12 @@ function parseForecastField(rawfieldname, fieldvalue) {
             case "probability":
             case "wind_speed_kt":
             case "wind_gust_kt":
+            case "wind_dir_degrees":
+            case "wind_shear_dir_degrees":
             case "wind_shear_hgt_ft_agl":
             case "wind_shear_speed_kt":
             case "vert_vis_ft":
             case "visibility_statute_mi":
-                html += `<label class="pirepitem">${fieldname}: <b>${pirepvalue}</b></label><br />`;
-                break;
-            case "wind_shear_dir_degrees":
-            case "wind_dir_degrees":
                 html += `${pireplabel}${fieldname}: <b>${pirepvalue}°</b></label><br />`;
                 break;
             case "sky_condition":
@@ -917,6 +989,7 @@ function parseForecastField(rawfieldname, fieldvalue) {
                 break;
             case "pirep_type":
             case "aircraft_ref":
+            case "raw_text":
                 break;
             default:
                 console.log(`${pirepkey} NOT FOUND!`);
@@ -1020,7 +1093,7 @@ function parseConditionField(rawfieldname, fieldvalue) {
             image = getConditionImage(rawfieldname, fieldvalue);
             html += `<label class="pirepitem">${fieldname}</label>`;
             html += `<div class="conditionimage"><image src="${URL_SERVER}/img/${image}"><div><br />`;
-            break;
+            break;FROM
         case "turbulence_base_ft_msl":
         case "icing_base_ft_msl":
             html += `<label class="pirepitem">${fieldname}: <b>${fieldvalue}</b></label><br />`;
@@ -1122,51 +1195,204 @@ function displayAirportPopup(feature) {
 }
 
 /**
- * 
+ * Build the html for a traffic feature
+ * @param {*} feature: the traffic the user clicked on 
+ */
+function displayTrafficPopup(feature) {
+    let jsondata = feature.get("jsondata");
+    let name = jsondata.Tail; 
+    let brng = jsondata.Bearing.toFixed(0);
+    let distft = (jsondata.Distance * 3.28084); //.toFixed(0);
+    let distmi = (distft / 5280);
+    let html = `<div id="#featurepopup"><pre><code>`;
+        html += `<label>${jsondata.Reg}\n` + 
+                        `Altitude:&nbsp${jsondata.Alt}\n` + 
+                        `Type:&nbsp${getEmitterCategoryText(jsondata.Emitter_category)}\n` +
+                        `Course/Speed:&nbsp${jsondata.Track}@${jsondata.Speed}kt\n` + 
+                        `Bearing:&nbsp:${brng}&#176;\n` +
+                        `Distance to target:&nbsp${distmi.toFixed(1)}&nbspmiles\n` +
+                        `Age of report:&nbsp${jsondata.Age.toFixed(1)}&nbspsecs` +
+                `</label></pre></code></div>`;
+    popupcontent.innerHTML = html; 
+}
+
+/**
+ * Timed process for getting rid of stale traffic reports
+ */
+function checkForStaleTraffic() {
+    let nowdate = new Date();
+    for (let [key, traffic] of trafficMap) {
+        let lasttimestamp = new Date(traffic.data.Timestamp);
+        let msec = nowdate - lasttimestamp;
+        let secs = (msec/1000);
+        if (secs > 30) {
+            trafficMap.delete(key);
+        }
+    }
+    if (trafficMap.size === 0) {
+        trafficFeatures.clear();
+    }
+}
+
+/**
+ * Get the human-readable description for an ADS-B emitter category
+ * @param {integer} emitter category
+ * @returns string description of emitter
+ */
+function getEmitterCategoryText(emitter) {
+    let def = "";
+    switch(emitter) {
+        case 0: 
+            def = "no information";
+            break;
+        case 1: 
+            def = "light aircraft (less than 15500 lbs)";
+            break;
+        case 2:
+            def = "small aircraft (15500  to 75000 lbs)";
+            break;
+        case 3:
+            def = "medium aircraft (75000 to 300000 lbs)";
+            break;
+        case 4: 
+            def = "High Vortex Large aircraft"
+            break;
+        case 5: 
+            def = "Heavy aircraft (>= 300000 lbs)";
+            break;
+        case 6: 
+            def = "high performance military";
+            break;
+        case 10: 
+            def = "rotocraft";
+            break;
+        case 11: 
+            def = "glider / sailplane";
+            break;
+        case 12: 
+            def = "lighter-than-air";
+            break;
+        case 13: 
+            def = "drone";
+            break;
+        case 14: 
+            def = "space / transatmospheric vehicle";
+            break;
+        case 15: 
+            def = "ultralight / hangglider / paraglider";
+            break;
+        case 16: 
+            def = "parachutist / skydiver";
+            break;
+        case 20: 
+            def = "surface emergency vehicle";
+            break;
+        case 21: 
+            def = "surface service vehicle";
+            break;
+        case 22: 
+            def = "fixed ground or tethered obstruction";
+            break;
+        case 23: 
+            def = "cluster obstacle";
+            break;
+        case 24: 
+            def = "line obstacle";
+            break;
+    } 
+    return def;
+}
+
+/**
+ * Draw any traffic on the map
+ */
+function processTraffic() {
+    /*-----------------------------------------------------------------------------------------    
+                                 Traffic JSON sample 
+    -------------------------------------------------------------------------------------------
+    {"Icao_addr":11316589,"Reg":"N916EV","Tail":"N916EV","Emitter_category":0,
+    "OnGround":false,"Addr_type":0,"TargetType":0,"SignalLevel":-28.00244822746525,
+    "Squawk":0,"Position_valid":false,"Lat":0,"Lng":0,"Alt":5550,"GnssDiffFromBaroAlt":0,
+    "AltIsGNSS":false,"NIC":0,"NACp":0,"Track":0,"Speed":0,"Speed_valid":false,"Vvel":0,
+    "Timestamp":"2019-03-12T13:32:30.563Z","PriorityStatus":0,"Age":18.2,"AgeLastAlt":1.83,
+    "Last_seen":"0001-01-01T00:39:27.49Z","Last_alt":"0001-01-01T00:39:43.86Z",
+    "Last_GnssDiff":"0001-01-01T00:00:00Z","Last_GnssDiffAlt":0,"Last_speed":"0001-01-01T00:00:00Z",
+    "Last_source":1,"ExtrapolatedPosition":false,"BearingDist_valid":true,
+    "Bearing":92.7782277589171,"Distance":9.616803034808295e+06}
+    --------------------------------------------------------------------------------------------*/  
+    
+    trafficFeatures.clear();
+    
+    for (let [key, traffic] of trafficMap) {
+        let data = traffic.data;
+        if (data.Lng !== 0 || data.Lat !== 0) {
+            let geometry = new ol.geom.Point(ol.proj.fromLonLat([data.Lng, data.Lat]));   
+            let trafficmarker = new ol.style.Icon({
+                crossOrigin: "anonymous",
+                src: `${URL_SERVER}/img/${configuration.trafficimage}`,
+                offset: [0,0],
+                opacity: 1,
+                scale: .08,
+                rotation: data.Track * 0.0174533 // in radians  
+            });
+            let trafficFeature = new ol.Feature({
+                ident: key,
+                jsondata: data,
+                datatype: "traffic",
+                geometry: geometry
+            });
+            
+            trafficFeature.setStyle(new ol.style.Style({
+                image: trafficmarker
+            }));
+            
+            trafficFeature.setId(key);
+            trafficFeatures.push(trafficFeature);
+            trafficFeature.changed();
+        }
+    }
+}
+
+/**
+ * Place metar features on the map. color-coded to the conditions
  * @param {object} metarsobject: JSON object with LOTS of metars
  */
-function processMetars(metarsobject) {
+ function processMetars(metarsobject) {
     let newmetars = metarsobject.response.data.METAR;
     if (newmetars !== undefined) {
         metarFeatures.clear();
+        metarMarkers = [];
+        let scale = getScaleSize();
         try {
-            /**
-             * Add this metar feature to the metars feature collection
-             */
-            newmetars.forEach((metar) => {  
+            newmetars.forEach((metar) => {
                 let svg = "";
+                let svg2 = "";
                 try { 
-                    svg = rawMetarToSVG(metar.raw_text, 150, 150, settings.usemetricunits);
+                    svg = rawMetarToSVG(metar.raw_text, 150, 150, configuration.usemetricunits);
+                    svg2 = getWindBarbSvg(95, 95, metar); 
                 }
                 catch { }
-                let feature = new ol.Feature({
+                  
+                let metarmarker = new ol.style.Icon({
+                    crossOrigin: "anonymous",
+                    src: `data:image/svg+xml;utf8,${escape(svg2)}`,
+                    offset: [0,0],
+                    opacity: 1,
+                    scale: scale
+                });
+                let metarFeature = new ol.Feature({
                     metar: metar,
                     datatype: "metar",
                     geometry: new ol.geom.Point(ol.proj.fromLonLat([metar.longitude, metar.latitude])),
-                    svgimage: svg
+                    svgimage: svg 
                 });
-                feature.setId(metar.station_id);
-                try {
-                    switch (metar.flight_category) {
-                        case 'IFR':
-                            feature.setStyle(ifrStyle)
-                            break;
-                        case 'LIFR':
-                            feature.setStyle(lifrStyle);
-                            break;
-                        case 'MVFR':
-                            feature.setStyle(mvfrStyle);
-                            break;
-                        case 'VFR':
-                        default:
-                            feature.setStyle(vfrStyle);
-                            break;
-                    }
-                    metarFeatures.push(feature);
-                }
-                catch(error){
-                   console.log(error.message); 
-                }
+                metarFeature.setStyle(new ol.style.Style({
+                    image: metarmarker
+                }));
+                metarMarkers.push(metarmarker);
+                metarFeature.setId(metar.station_id);
+                metarFeatures.push(metarFeature);
+                metarFeature.changed();
             });
         }
         catch(error) {
@@ -1176,7 +1402,7 @@ function processMetars(metarsobject) {
 }
 
 /**
- * 
+ * Place taf feature objects on the map
  * @param {object} tafsobject: JSON object with LOTS of tafs 
  */
 function processTafs(tafsobject) {
@@ -1185,9 +1411,6 @@ function processTafs(tafsobject) {
         tafFeatures.clear();
         try {
             newtafs.forEach((taf) => {
-                /**
-                 * Add this taf to the fafs feature collection
-                 */
                 let taffeature = new ol.Feature({
                     ident: taf.station_id,
                     taf: taf,
@@ -1197,6 +1420,7 @@ function processTafs(tafsobject) {
                 taffeature.setId(taf.station_id);
                 taffeature.setStyle(tafStyle);
                 tafFeatures.push(taffeature);
+                taffeature.changed();
             });
         }
         catch (error){
@@ -1206,7 +1430,7 @@ function processTafs(tafsobject) {
 }
 
 /**
- * 
+ * Place pirep features on the map
  * @param {object} pirepsobject: JSON object with LOTS of pireps 
  */
  function processPireps(pirepsobject) {
@@ -1215,11 +1439,11 @@ function processTafs(tafsobject) {
         pirepFeatures.clear();
         try {
             newpireps.forEach((pirep) => {
-                let pseudoheading = Math.random()*Math.PI*2;
-                
-                /**
-                 * Add this pirep to the pireps feature collection
-                 */
+                // generate a "pseudo-heading" to use if wind dir is absent
+                let heading = Math.random()*Math.PI*2;
+                if (pirep.wind_dir_degrees) {
+                    heading = (pirep.wind_dir_degrees * 0.0174533);
+                }
                 let pirepfeature = new ol.Feature({
                     ident: pirep.aircraft_ref,
                     pirep: pirep,
@@ -1231,12 +1455,12 @@ function processTafs(tafsobject) {
                 pirepfeature.setStyle(new ol.style.Style({
                                         image: new ol.style.Icon({
                                             crossOrigin: 'anonymous',
-                                            src: `${URL_SERVER}/img/pirep.png`,
-                                            size:[85, 85],
+                                            src: `${URL_SERVER}/img/airplane.svg`,
+                                            //size:[85, 85],
                                             offset: [0,0],
                                             opacity: 1,
-                                            scale: .50,
-                                            rotation: pseudoheading
+                                            scale: .05,
+                                            rotation: heading
                                         })
                                     })
                 );
@@ -1253,16 +1477,52 @@ function processTafs(tafsobject) {
  * This routine adjusts feature "dot" image 
  * sizes, depending on current zoom level
  */
-function resizeDots() {
-    let rawnum = .045 * currentZoom;
-    let newscale = rawnum.toFixed(3)
-    vfrMarker.setScale(newscale);
-    mvfrMarker.setScale(newscale);
-    lifrMarker.setScale(newscale);
-    ifrMarker.setScale(newscale);
-    tafMarker.setScale(newscale);
-    airportMarker.setScale(newscale);
-    heliportMarker.setScale(newscale);
+let resizing = false;
+function resizeDots(newzoom) {
+    if (!resizing) {
+        resizing = true;
+        currentZoom = parseInt(newzoom.toFixed(0));
+        let newscale = getScaleSize();
+        for (let i = 0; i < metarMarkers.length; i++) {
+            metarMarkers[i].setScale(newscale + .2);
+        }
+        //pirepMarker.setScale(newscale * .08);
+        airportMarker.setScale(newscale * .30);
+        heliportMarker.setScale(newscale * .50);
+        tafMarker.setScale(newscale * .25);
+        resizing = false;
+    }
+}
+
+function getScaleSize() {
+    let scale = 1;
+    switch(currentZoom) {
+        case 4:
+            scale = .20;
+            break;
+        case 5:
+            scale = .40;
+            break;
+        case 6:
+            scale = .60;
+            break;
+        case 7:
+            scale = .80;
+            break;
+        case 8:
+            scale = 1;
+            break;
+        case 9:
+            scale = 1.2;
+            break;
+        case 10:
+            scale = 1.4;
+            break;
+        case 11:
+            scale = 1.6;
+            break;
+    }
+    return scale;
 }
 
 /**
@@ -1270,7 +1530,7 @@ function resizeDots() {
  */
 animatedWxTileSource = new ol.source.TileWMS({
     attributions: ['Iowa State University'],
-    url: settings.animatedwxurl,
+    url: configuration.animatedwxurl,
     params: {'LAYERS': 'nexrad-n0r-wmst'},
 });
 
@@ -1285,8 +1545,7 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
         title: "VFR Sectional Chart",
         type: "overlay", 
         source: new ol.source.XYZ({
-            attributions: ["© <a href='https://www.openflightmaps.org'>openflightmaps.org</a>"],
-            url: URL_GET_VFRSEC_TILE,
+            url: URL_GET_TILE.replace("[tilesetname]", "sect"),
             maxZoom: 11,
             minZoom: 5,
             attributionsCollapsible: false
@@ -1300,7 +1559,7 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
         title: "Terminal Area Charts",
         type: "overlay", 
         source: new ol.source.XYZ({
-            url: URL_GET_TERM_TILE,
+            url: URL_GET_TILE.replace("[tilesetname]", "term"),
             maxZoom: 12,
             minZoom: 8
         }),
@@ -1313,7 +1572,7 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
         title: "Helicopter Charts",
         type: "overlay", 
         source: new ol.source.XYZ({
-            url: URL_GET_HELI_TILE,
+            url: URL_GET_TILE.replace("[tilesetname]", "heli"),
             maxZoom: 13,
             minZoom: 8
         }),
@@ -1326,7 +1585,7 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
         title: "Caribbean Charts",
         type: "overlay", 
         source: new ol.source.XYZ({
-            url: URL_GET_CARIB_TILE,
+            url: URL_GET_TILE.replace("[tilesetname]", "carib"),
             maxZoom: 11,
             minZoom: 5
         }),
@@ -1339,7 +1598,7 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
         title: "Grand Canyon Air Ops",
         type: "overlay", 
         source: new ol.source.XYZ({
-            url: URL_GET_GCAO_TILE,
+            url: URL_GET_TILE.replace("[tilesetname]", "gcao"),
             maxZoom: 12,
             minZoom: 8
         }),
@@ -1352,7 +1611,7 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
         title: "Grand Canyon GA",
         type: "overlay", 
         source: new ol.source.XYZ({
-            url: URL_GET_GCGA_TILE,  
+            url: URL_GET_TILE.replace("[tilesetname]", "gcga"),  
             maxZoom: 12,
             minZoom: 8
         }),
@@ -1378,11 +1637,26 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
         zIndex: 11
     });
 
-    if (settings.useOSMonlinemap) {
-        osmTileLayer = new ol.layer.Tile({
-            title: "Open Street Maps",
+    if (configuration.useOSMonlinemap) {
+        osmOnlineTileLayer = new ol.layer.Tile({
+            title: "Open Street Maps (online)",
             type: "overlay",
             source: new ol.source.OSM(),
+            visible: true,
+            extent: extent,
+            zIndex: 9
+        });
+    }
+    else {
+        osmOfflineTileLayer = new ol.layer.Tile({
+            title: "Open Street Maps (offline)",
+            type: "overlay",
+            source: new ol.source.XYZ({
+                url: URL_GET_OSM_TILE,  
+                maxZoom: 7,
+                minZoom: 1,
+                attributions: [ol.source.OSM.ATTRIBUTION],
+            }),
             visible: true,
             extent: extent,
             zIndex: 9
@@ -1429,7 +1703,19 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
         title: "Pireps",
         source: pirepVectorSource,
         visible: false,
-        extent: extent, zIndex: 14
+        extent: extent, 
+        zIndex: 14
+    });
+
+    trafficVectorSource = new ol.source.Vector({
+        features: trafficFeatures
+    });
+    trafficVectorLayer = new ol.layer.Vector({
+        title: "Traffic",
+        source: trafficVectorSource,
+        visible: false,
+        extent: extent,
+        zIndex: 14
     });
 
     map.addLayer(debugTileLayer);
@@ -1437,6 +1723,7 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
     map.addLayer(metarVectorLayer); 
     map.addLayer(tafVectorLayer);
     map.addLayer(pirepVectorLayer);
+    map.addLayer(trafficVectorLayer);
     map.addLayer(animatedWxTileLayer);
     map.addLayer(caribbeanTileLayer);
     map.addLayer(grandcanyonAoTileLayer);
@@ -1445,10 +1732,12 @@ $.get(`${URL_GET_TILESETS}`, (data) => {
     map.addLayer(terminalTileLayer);
     map.addLayer(sectionalTileLayer);
 
-    if (settings.useOSMonlinemap) {
-        map.addLayer(osmTileLayer);
+    if (configuration.useOSMonlinemap) {
+        map.addLayer(osmOnlineTileLayer);
     }
-
+    else {
+        map.addLayer(osmOfflineTileLayer);
+    }
     let layerSwitcher = new ol.control.LayerSwitcher({
         tipLabel: 'Layers', 
         groupSelectStyle: 'children'
@@ -1486,16 +1775,8 @@ function selectStyle(feature) {
  * If saving position history is enabled,  
  * save it at a specified time interval
  */
-if (settings.putpositionhistory) {
-    setInterval(putPositionHistory, settings.histintervalmsec);
-}
-
-/**
- * If using Stratux as a gps position source, 
- * get the data at a specified time interval
- */
-if (settings.getgpsfromstratux) {
-    setInterval(getGpsData, settings.gpsintervalmsec);
+if (configuration.savepositionhistory) {
+    setInterval(savePositionHistory, configuration.histintervalmsec);
 }
 
 /**
@@ -1596,54 +1877,46 @@ const convertCtoF = ((temp) => {
     else return `${num.toFixed(1)} F°`;
 });
 
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//
-//      JSON output returned by websocket connected Stratux at ws://[ipaddress]/situation (AHRS data)
-//
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//
-// {"GPSLastFixSinceMidnightUTC":0,"GPSLatitude":0,"GPSLongitude":0,"GPSFixQuality":0,"GPSHeightAboveEllipsoid":0,"GPSGeoidSep":0,
-//  "GPSSatellites":0,"GPSSatellitesTracked":0,"GPSSatellitesSeen":2,"GPSHorizontalAccuracy":999999,"GPSNACp":0,"GPSAltitudeMSL":0,
-//  "GPSVerticalAccuracy":999999,"GPSVerticalSpeed":0,"GPSLastFixLocalTime":"0001-01-01T00:00:00Z","GPSTrueCourse":0,"GPSTurnRate":0,
-//  "GPSGroundSpeed":0,"GPSLastGroundTrackTime":"0001-01-01T00:00:00Z","GPSTime":"0001-01-01T00:00:00Z",
-//  "GPSLastGPSTimeStratuxTime":"0001-01-01T00:00:00Z","GPSLastValidNMEAMessageTime":"0001-01-01T00:01:33.5Z",
-//  "GPSLastValidNMEAMessage":"$PUBX,00,000122.90,0000.00000,N,00000.00000,E,0.000,NF,5303302,3750001,0.000,0.redrawMetars00,0.000,,99.99,99.99,99.99,0,0,0*20",
-//  "GPSPositionSampleRate":0,"BaroTemperature":22.1,"BaroPressureAltitude":262.4665,"BaroVerticalSpeed":-0.6568238,
-//  "BaroLastMeasurementTime":"0001-01-01T00:01:33.52Z","AHRSPitch":-1.7250436907060false585,"AHRSRoll":1.086912223392926,
-//  "AHRSGyroHeading":3276.7,"AHRSMagHeading":3276.7,"AHRSSlipSkid":-0.6697750324029778,"AHRSTurnRate":3276.7,
-//  "AHRSGLoad":0.9825397416431592,"AHRSGLoadMin":0.9799488522426687,"AHRSGLoadMax":0.9828301105039375,
-//  "AHRSLastAttitudeTime":"0001-01-01T00:01:33.55Z","AHRSStatus":6}
-//
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 let deg = 0;
 let alt = 0;
 let lng = 0;
 let lat = 0;
 
 /**
- * Get gps data from Stratux, updates current position
- * @returns statute miles, kilometers or nautical miles   
- * and orients the rotation of the ownship image
+ * Set ownship orientation from Stratux situation, updates airplane image current position
  */
-function getGpsData() {
-    $.get(settings.stratuxurl, function(data) {
-        viewposition = ol.proj.fromLonLat([data.GPSLongitude, data.GPSLatitude]);
-        if (data.GPSLongitude !== 0 && data.GPSLatitude !== 0) {
-            myairplane.setOffset(offset);
-            myairplane.setPosition(viewposition);
-            lng = data.GPSLongitude;
-            lat = data.GPSLatitude;
-            alt = data.GPSAltitudeMSL;
-            deg = parseInt(data.AHRSMagHeading / 10);
-            airplaneElement.style.transform = "rotate(" + deg + "deg)";
-        }
-    });
+ function setOwnshipOrientation(jsondata) {
+    /*---------------------------------------------------------------
+                    Situation json data field example
+     *---------------------------------------------------------------
+      { "GPSLastFixSinceMidnightUTC": 61233.1,GPSLatitude": 30.714376,"GPSLongitude": -98.254944,"GPSFixQuality": 1,"GPSHeightAboveEllipsoid": 1187.6641,
+        "GPSGeoidSep": -78.41207,"GPSSatellites": 9,"GPSSatellitesTracked": 22,"GPSSatellitesSeen": 14,"GPSHorizontalAccuracy": 4.8500004,
+        "GPSNACp": 10,"GPSAltitudeMSL": 1266.0762,"GPSVerticalAccuracy": 6.85,"GPSVerticalSpeed": 0,"GPSLastFixLocalTime": "0001-01-03T18:43:51.48Z",
+        "GPSTrueCourse": 45.51,"GPSTurnRate": 0,"GPSGroundSpeed": 1.1610000133514404,"GPSLastGroundTrackTime": "0001-01-03T18:43:51.48Z",
+        "GPSTime": "2022-07-14T17:00:33.18Z","GPSLastGPSTimeStratuxTime": "0001-01-03T18:43:51.48Z","GPSLastValidNMEAMessageTime": "0001-01-03T18:43:51.48Z",
+        "GPSLastValidNMEAMessage": "$GNGGA,170033.10,3042.86261,N,09815.29674,W,1,09,0.97,385.9,M,-23.9,M,,*77","GPSPositionSampleRate": 9.998427260812582,
+        "BaroTemperature": 41.89,"BaroPressureAltitude": 1085.1527,"BaroVerticalSpeed": -3.136783,"BaroLastMeasurementTime": "0001-01-03T18:43:51.53Z",
+        "BaroSourceType": 1,"AHRSPitch": -0.0025035837716802546,"AHRSRoll": 0.049514056369771665,"AHRSGyroHeading": 3276.7,"AHRSMagHeading": 3276.7,
+        "AHRSSlipSkid": -0.03840070310305229,"AHRSTurnRate": 3276.7,"AHRSGLoad": 0.9996413993502861,"AHRSGLoadMin": 0.9930797723335983,
+        "AHRSGLoadMax": 1.0025976589458154,"AHRSLastAttitudeTime": "0001-01-03T18:43:51.53Z","AHRSStatus": 7
+      }
+    */
+    viewposition = ol.proj.fromLonLat([jsondata.GPSLongitude, jsondata.GPSLatitude]);
+    if (jsondata.GPSLongitude !== 0 && jsondata.GPSLatitude !== 0) {
+        myairplane.setOffset(offset);
+        myairplane.setPosition(viewposition);
+        lng = jsondata.GPSLongitude;
+        lat = jsondata.GPSLatitude;
+        alt = jsondata.GPSAltitudeMSL;
+        deg = parseInt(jsondata.AHRSMagHeading / 10);
+        airplaneElement.style.transform = "rotate(" + deg + "deg)";
+    }
 }
 
 /**
  * Save the position history in positionhistory.db
  */
-function putPositionHistory() {
+function savePositionHistory() {
     if (last_longitude !== lng || last_latitude !== lat) {
         if (lng + lat + deg + alt > 0) {
             let postage = { longitude: lng, 
@@ -1862,6 +2135,7 @@ function loadTafFieldKeymap() {
  * Load normalized metar field names
  */
  function loadMetarFieldKeymap() {
+    metarFieldKeymap.set("change_indicator", "Change indicator");
     metarFieldKeymap.set("raw_text", "raw text");
     metarFieldKeymap.set("station_id", "station id"); 
     metarFieldKeymap.set("observation_time", "Observation Time");
@@ -1911,6 +2185,10 @@ function getWeatherAcronymDescription(acronym) {
  * Load the wxkeymap Map object with weather code descriptions
  */
 function loadWeatherAcronymKeymap() {
+    weatherAcronymKeymap.set("FM", "From");
+    weatherAcronymKeymap.set("TEMPO", "Temporary");
+    weatherAcronymKeymap.set("BECMG", "Becoming");
+    weatherAcronymKeymap.set("PROB", "Probability");
     weatherAcronymKeymap.set("FU", "Smoke");
     weatherAcronymKeymap.set("VA", "Volcanic Ash");
     weatherAcronymKeymap.set("HZ", "Haze");
@@ -1997,7 +2275,10 @@ function getSkyConditionDescription(acronym) {
  */
  function loadSkyConditionmKeymap() {
     skyConditionKeymap.set("BKN", "Broken");
+    skyConditionKeymap.set("FM", "From");
+    skyConditionKeymap.set("TEMPO", "Temporary");
     skyConditionKeymap.set("BECMG", "Becoming");
+    skyConditionKeymap.set("PROB", "Probability");
     skyConditionKeymap.set("CB", "Cumulo-Nimbus");
     skyConditionKeymap.set("IMC", "Instrument meteorological conditions"),
     skyConditionKeymap.set("IMPR", "Improving");
@@ -2544,8 +2825,8 @@ let RECENT_WEATHER = {
     REVA: "Volcanic Ash",
 };
 
-var GUST_WIDTH = 2;
-var WS_WIDTH = 4;
+var GUST_WIDTH = 5;
+var WS_WIDTH = 5;
 /**
  * Creates a windbarb for the metar
  * @param metar
@@ -2555,20 +2836,35 @@ function genWind(metar) {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
     var WDD = metar.wind_direction ? metar.wind_direction : 0;
     var WSP = metar.wind_speed ? metar.wind_speed : 0;
+    var WGSP = metar.gust_speed ? metar.gust_speed : 0;
     var wind = "";
     var gust = "";
     if (WSP === 0) {
         wind =
-            "<g id=\"calm\">\n                <ellipse id=\"calm-marker\" stroke=\"#000\" fill=\"#00000000\" cx=\"250\" cy=\"250\" rx=\"35\" ry=\"35\"/>\n            </g>";
+            `<g id="calm"><ellipse id="calm-marker" stroke="#000" fill="#00000000" cx="250" cy="250" rx="35" ry="35"/></g>`;
     }
     else {
-        gust = metar.gust_speed == null ? "" :
-            "<g id=\"gustBarb\" transform=\"rotate(" + WDD + ", 250, 250)\">\n                " + genBarb1((_a = metar.gust_speed) !== null && _a !== void 0 ? _a : 0, true) + "\n                " + genBarb2((_b = metar.gust_speed) !== null && _b !== void 0 ? _b : 0, true) + "\n                " + genBarb3((_c = metar.gust_speed) !== null && _c !== void 0 ? _c : 0, true) + "\n                " + genBarb4((_d = metar.gust_speed) !== null && _d !== void 0 ? _d : 0, true) + "\n                " + genBarb5((_e = metar.gust_speed) !== null && _e !== void 0 ? _e : 0, true) + "\n            </g>";
+        gust = (metar.gust_speed === null || metar.gust_speed === undefined) ? "" :
+            `<g id="gustBarb" transform="rotate(${WDD}, 250, 250)"> ` +
+                `${genBarb1((_a = WGSP) !== null && _a !== void 0 ? _a : 0, true)} ` + 
+                `${genBarb2((_b = WGSP) !== null && _b !== void 0 ? _b : 0, true)} ` + 
+                `${genBarb3((_c = WGSP) !== null && _c !== void 0 ? _c : 0, true)} ` + 
+                `${genBarb4((_d = WGSP) !== null && _d !== void 0 ? _d : 0, true)} ` + 
+                `${genBarb5((_e = WGSP) !== null && _e !== void 0 ? _e : 0, true)} ` + 
+            `</g>`;
         wind =
-            "<g id=\"windBard\" transform=\"rotate(" + WDD + ", 250, 250)\">\n                <line stroke-width=\"3\" y1=\"225\" x1=\"250\" y2=\"50\" x2=\"250\"  stroke=\"#000\" fill=\"none\" />\n                " + genBarb1((_f = metar.wind_speed) !== null && _f !== void 0 ? _f : 0, false) + "\n                " + genBarb2((_g = metar.wind_speed) !== null && _g !== void 0 ? _g : 0, false) + "\n                " + genBarb3((_h = metar.wind_speed) !== null && _h !== void 0 ? _h : 0, false) + "\n                " + genBarb4((_j = metar.wind_speed) !== null && _j !== void 0 ? _j : 0, false) + "\n                " + genBarb5((_k = metar.wind_speed) !== null && _k !== void 0 ? _k : 0, false) + "\n            </g>";
+            `<g id="windBarb" transform="rotate(${WDD}, 250, 250)">` + 
+            `<line stroke-width="5" y1="225" x1="250" y2="90" x2="250" stroke="#000" fill="none"/>` +
+                `${genBarb1((_f = WSP) !== null && _f !== void 0 ? _f : 0, false)} ` + 
+                `${genBarb2((_g = WSP) !== null && _g !== void 0 ? _g : 0, false)} ` + 
+                `${genBarb3((_h = WSP) !== null && _h !== void 0 ? _h : 0, false)} ` + 
+                `${genBarb4((_j = WSP) !== null && _j !== void 0 ? _j : 0, false)} ` + 
+                `${genBarb5((_k = WSP) !== null && _k !== void 0 ? _k : 0, false)} ` + 
+            `</g>`;
     }
     return gust + wind;
 }
+
 /**
  * Generate first barb
  * @param speed wind or gust speed
@@ -2581,10 +2877,11 @@ function genBarb1(speed, gust) {
     var width = gust ? GUST_WIDTH : WS_WIDTH;
     var barb = "";
     if (speed >= 10 && speed < 50) {
-        barb = "<line id=\"" + tag + "-bard-1-long\" stroke-width=\"" + width + "\" y1=\"50\" x1=\"250\" y2=\"50\" x2=\"300\" stroke=\"" + fill + "\" transform=\"rotate(-35, 250, 50)\"/>";
+        //barb = `<line id="${tag}-barb-1-long" stroke-width="${width}" y1="50" x1="250" y2="50" x2="300" stroke="${fill}" transform="rotate(-35, 250, 50)"/>`;
+        barb = `<line id="${tag}-barb-1-long" stroke-width="${width}" y1="90" x1="250" y2="90" x2="305" stroke="${fill}" transform="rotate(-35, 250, 90)"/>`;
     }
     else if (speed >= 50) {
-        barb = "<polygon id=\"" + tag + "-bard-1-flag\" points=\"248,60 290,30 248,30\" fill=\"" + fill + "\" />";
+        barb = `<polygon id="${tag}-barb-1-flag" points="248,98 290,68 248,68" fill="${fill}" />`;
     }
     return barb;
 }
@@ -2600,10 +2897,10 @@ function genBarb2(speed, gust) {
     var width = gust ? GUST_WIDTH : WS_WIDTH;
     var barb = "";
     if ((speed < 10) || (15 <= speed && speed < 20) || (55 <= speed && speed < 60)) {
-        barb = "<line id=\"" + tag + "-bard-2-short\" stroke-width=\"" + width + "\" y1=\"70\" x1=\"250\" y2=\"70\" x2=\"275\" stroke=\"" + fill + "\" transform=\"rotate(-35, 250, 70)\"/>";
+        barb = `<line id="${tag}-barb-2-short" stroke-width="${width}" y1="110" x1="250" y2="110" x2="285" stroke="${fill}" transform="rotate(-35, 250, 110)"/>`;
     }
     else if ((15 < speed && speed < 50) || (speed >= 60)) {
-        barb = "<line id=\"" + tag + "-bard-2-long\" stroke-width=\"" + width + "\" y1=\"70\" x1=\"250\" y2=\"70\" x2=\"300\" stroke=\"" + fill + "\" transform=\"rotate(-35, 250, 70)\"/>";
+        barb = `<line id="${tag}-barb-2-long" stroke-width="${width}" y1="110" x1="250" y2="110" x2="305" stroke="${fill}" transform="rotate(-35, 250, 110)"/>`;
     }
     return barb;
 }
@@ -2619,10 +2916,10 @@ function genBarb3(speed, gust) {
     var width = gust ? GUST_WIDTH : WS_WIDTH;
     var barb = "";
     if ((25 <= speed && speed < 30) || (65 <= speed && speed < 70)) {
-        barb = "<line id=\"" + tag + "-bard-3-short\" stroke-width=\"" + width + "\" y1=\"90\"  x1=\"250\" y2=\"90\" x2=\"275\" stroke=\"" + fill + "\" transform=\"rotate(-35, 250, 90)\"/>";
+        barb = `<line id="${tag}-barb-3-short" stroke-width="${width}" y1="150"  x1="250" y2="150" x2="285" stroke="${fill}" transform="rotate(-35, 250, 150)"/>`;
     }
     else if ((25 < speed && speed < 50) || speed >= 70) {
-        barb = "<line id=\"" + tag + "-bard-3-long\" stroke-width=\"" + width + "\" y1=\"90\"  x1=\"250\" y2=\"90\" x2=\"300\" stroke=\"" + fill + "\" transform=\"rotate(-35, 250, 90)\"/>";
+        barb = `<line id="${tag}-bard-3-long" stroke-width="${width}" y1="150"  x1="250" y2="150" x2="305" stroke="${fill}" transform="rotate(-35, 250, 150)"/>`;
     }
     return barb;
 }
@@ -2638,10 +2935,10 @@ function genBarb4(speed, gust) {
     var width = gust ? GUST_WIDTH : WS_WIDTH;
     var barb = "";
     if ((35 <= speed && speed < 40) || (75 <= speed && speed < 80)) {
-        barb = "<line id=\"" + tag + "-bard-4-short\" stroke-width=\"" + width + "\" y1=\"110\" x1=\"250\" y2=\"110\" x2=\"275\"  stroke=\"" + fill + "\" transform=\"rotate(-35, 250, 110)\"/>";
+        barb = `<line id="${tag}-barb-4-short" stroke-width="${width}" y1="190" x1="250" y2="190" x2="285" stroke="${fill}" transform="rotate(-35, 250, 190)"/>`;
     }
     else if ((35 < speed && speed < 50) || speed >= 80) {
-        barb = "<line id=\"" + tag + "-bard-4-long\" stroke-width=\"" + width + "\" y1=\"110\" x1=\"250\" y2=\"110\" x2=\"300\"  stroke=\"" + fill + "\" transform=\"rotate(-35, 250, 110)\"/>";
+        barb = `<line id="${tag}-barb-4-long" stroke-width="${width}" y1="190" x1="250" y2="190" x2="305"  stroke="${fill}" transform="rotate(-35, 250, 190)"/>`;
     }
     return barb;
 }
@@ -2655,11 +2952,11 @@ function genBarb5(speed, gust) {
     var fill = gust ? 'red' : '#000';
     var tag = gust ? 'gs' : 'ws';
     var width = gust ? GUST_WIDTH : WS_WIDTH;
-    var brab = "";
+    var barb = "";
     if ((45 <= speed && speed < 50) || (85 <= speed && speed < 90)) {
-        brab = "<line id=\"" + tag + "-bard-5-short\" stroke-width=\"" + width + "\" y1=\"130\" x1=\"250\" y2=\"130\" x2=\"275\"  stroke=\"" + fill + "\" transform=\"rotate(-35, 250, 130)\"/>";
+        barb = `<line id="${tag}-barb-5-short" stroke-width="${width}" y1="230" x1="250" y2="230" x2="285" stroke="${fill}" transform="rotate(-35, 250, 230)"/>`;
     }
-    return brab;
+    return barb;
 }
 
 //Meassage types
@@ -2826,7 +3123,7 @@ function parseWeather(metar) {
 }
 
 /**
- * Parse visability
+ * Parse visibility
  * @param metar raw metar
  * @returns
  */
@@ -2967,7 +3264,7 @@ function rawMetarToMetarPlot(rawMetar, metric) {
     }
     return {
         metric: metric !== null && metric !== void 0 ? metric : false,
-        visablity: vis,
+        visiblity: vis,
         temp: temp,
         dew_point: dp,
         station: metar.station,
@@ -2976,7 +3273,7 @@ function rawMetarToMetarPlot(rawMetar, metric) {
         gust_speed: metar.wind.gust,
         wx: wx,
         pressure: pressure,
-        coverage: determinCoverage(metar)
+        coverage: determineCoverage(metar)
     };
 }
 
@@ -2998,7 +3295,7 @@ function milePrettyPrint(meters) {
  * @param metar
  * @returns
  */
-function determinCoverage(metar) {
+function determineCoverage(metar) {
     var _a;
     var prevailingCoverage;
     metar.clouds.forEach(function (cloud) {
@@ -3032,18 +3329,67 @@ function determinCoverage(metar) {
     var DEW = (_c = metar.dew_point) !== null && _c !== void 0 ? _c : "";
     var STA = (_d = metar.station) !== null && _d !== void 0 ? _d : "";
     var ALT = (_e = metar.pressure) !== null && _e !== void 0 ? _e : "";
-    return "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" + width + "\" height=\"" + height + 
-           "\" viewBox=\"0 0 500 500\">\n                <style>\n                    .txt{ font-size: 47.5px; font-family: sans-serif; }\n                    .tmp{ fill: red }\n                    .sta{ fill: grey }\n                    .dew{ fill: blue }\n                    .vis{ fill: violet }\n                </style>\n                " + 
-           (0, genWind)(metar) + "\n                " + 
-           (0, getWeatherSVG)((_f = metar.wx) !== null && _f !== void 0 ? _f : "") + "\n                " + 
-           (0, genCoverage)(metar.coverage, metar.condition) + "\n                <g id=\"text\">\n                    <text class=\"vis txt\" fill=\"#000000\" stroke=\"#000\" stroke-width=\"0\" x=\"80\"   y=\"260\" text-anchor=\"middle\" xml:space=\"preserve\">" + 
-           VIS + "</text>\n                    <text class=\"tmp txt\" fill=\"#000000\" stroke=\"#000\" stroke-width=\"0\" x=\"160\"  y=\"220\" text-anchor=\"middle\" xml:space=\"preserve\" >" + 
-           TMP + "</text>\n                    <text class=\"dew txt\" fill=\"#000000\" stroke=\"#000\" stroke-width=\"0\" x=\"160\"  y=\"315\" text-anchor=\"middle\" xml:space=\"preserve\">" + 
-           DEW + "</text>\n                    <text class=\"sta txt\" fill=\"#000000\" stroke=\"#000\" stroke-width=\"0\" x=\"275\"  y=\"315\" text-anchor=\"start\" xml:space=\"preserve\">" + 
-           STA + "</text>\n                    <text class=\"sta txt\" fill=\"#000000\" stroke=\"#000\" stroke-width=\"0\" x=\"275\"  y=\"220\"  text-anchor=\"start\" xml:space=\"preserve\">" + 
-           ALT + "</text>\n                </g>\n            </svg>";
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 500 500"> ` +
+           `<style> ` + 
+                `.txt{ font-size: 47.5px; font-family: sans-serif; } ` +
+                `.tmp{ fill: red } ` + 
+                `.sta{ fill: grey } ` + 
+                `.dew{ fill: blue } ` +
+                `.vis{ fill: violet } ` +
+           `</style> ${(0, genWind)(metar)} ${(0, getWeatherSVG)((_f = metar.wx) !== null && _f !== void 0 ? _f : "")} ` +
+           `         ${(0, genCoverage)(metar.coverage, metar.condition)} ` + 
+           `<g id="text"><text class="vis txt" fill="#000000" stroke="#000" stroke-width="0" x="80" y="260" text-anchor="middle" ` +
+           `xml:space="preserve">${VIS}</text><text class="tmp txt" fill="#000000" stroke="#000" stroke-width="0" x="160" y="220" text-anchor="middle" ` +
+           `xml:space="preserve">${TMP}</text><text class="dew txt" fill="#000000" stroke="#000" stroke-width="0" x="160"  y="315" text-anchor="middle" ` +
+           `xml:space="preserve">${DEW}</text><text class="sta txt" fill="#000000" stroke="#000" stroke-width="0" x="275"  y="315" text-anchor="start" ` +
+           `xml:space="preserve">${STA}</text><text class="sta txt" fill="#000000" stroke="#000" stroke-width="0" x="275"  y="220" text-anchor="start" ` +
+           `xml:space="preserve">${ALT}</text></g></svg>`;
 }
 
+/**
+ * Generate a wind barb SVG image
+ * @param {int} width 
+ * @param {int} height 
+ * @param {object} metar 
+ * @returns 
+ */
+function getWindBarbSvg(width, height, metar) {
+    let catcolor = "";
+    let svg = "";
+    let thismetar = {
+        wind_direction: metar.wind_dir_degrees,
+        wind_speed: metar.wind_speed_kt,
+        gust_speed: metar.gust_speed_kt,
+        station: metar.station_id
+    };
+    try {
+        switch (metar.flight_category) {
+            case "IFR":
+                catcolor ="ff0000";
+                break;
+            case "LIFR":
+                catcolor = "ff00ff";
+                break;
+            case "MVFR": 
+                catcolor = "0000cd";
+                break;
+            case "VFR":
+            default:
+                catcolor = "12f23c";
+                break;
+        }
+        svg = `<svg xmlns="http://www.w3.org/2000/svg" ` +
+                  `width="${width}" height="${height}" ` + 
+                  `viewBox="0 0 500 500">` + 
+                  (0, genWind)(thismetar) + 
+                  `<g id="clr">` + 
+                       `<circle cx="250" cy="250" r="30" stroke="#000000" stroke-width="3" fill="#${catcolor}"/>` +
+                  `</g>` + 
+               `</svg>`;
+    }
+    catch {}
+    return svg; 
+}
 /**
  * Convert ºF to ºF
  * @param celsius
@@ -3053,6 +3399,4 @@ function cToF(celsius) {
         return Math.round(celsius * 9 / 5 + 32);
     }
 }
-
-
 
